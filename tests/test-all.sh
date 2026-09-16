@@ -92,6 +92,12 @@ test_remove_profile() {
     [[ "$count" -eq 1 ]] && grep -q '"work"' "$SANDBOX_CONFIG"
 }
 
+test_bindings() {
+    local out
+    out=$("$SWITCHER" bindings 2>&1)
+    [[ "$out" == *"Configured Folder Bindings"* ]]
+}
+
 assert_test "Bash Script Syntax Validation" test_syntax
 assert_test "Help flag execution ('help')" test_help
 assert_test "Empty config list handling" test_empty_list
@@ -101,6 +107,7 @@ assert_test "Update existing profile without duplicates" test_update_existing
 assert_test "Add shortcut alias ('alias work w')" test_add_alias
 assert_test "Remove shortcut alias ('unalias work w')" test_remove_alias
 assert_test "Remove profile ('remove school -f')" test_remove_profile
+assert_test "List folder bindings command ('bindings')" test_bindings
 
 echo ""
 echo "============================================================"
