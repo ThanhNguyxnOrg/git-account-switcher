@@ -25,8 +25,7 @@ git-account-switcher/
 │   ├── switch-git.cmd             # Windows Command Prompt (CMD) wrapper
 │   └── switch-git                 # Backward-compatible Bash alias wrapper
 ├── config/
-│   ├── accounts.example.json      # Generic 3-account sample configuration
-│   └── accounts.json              # Default template copied on first installation
+│   └── accounts.example.json      # Generic 3-account sample configuration template
 ├── docs/
 │   ├── workflow.md                # 6-Phase Complete Workflow Guide
 │   ├── configuration.md           # Schema specification & real-world examples

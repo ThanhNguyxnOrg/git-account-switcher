@@ -11,3 +11,5 @@ Desktop.ini
 
 # Local custom configs (if any personal secrets)
 *.local.json
+config/accounts.json
+accounts.json
