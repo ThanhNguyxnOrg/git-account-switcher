@@ -120,16 +120,13 @@ Configured Account Profiles (3):
 
 ---
 
-## 📚 Deep Dive Documentation
+## 📚 Documentation
 
-For comprehensive guides, architectural patterns, and troubleshooting, explore the modular documentation:
-
-- 📚 **[Documentation Hub](docs/README.md)** — Centralized directory of all guides and architectural references.
-- 🚀 **[Complete Workflow Guide](docs/workflow.md)** — Step-by-step walkthrough across 6 phases (authentication, credential helper setup, daily switching, and verification).
-- ⚙️ **[Configuration & Schema Guide](docs/configuration.md)** — Full `accounts.json` reference, privacy noreply email rules, 3 real-world multi-account examples, and folder isolation (`includeIf`).
-- ❓ **[Troubleshooting & FAQ](docs/troubleshooting.md)** — Resolving Windows Credential Manager (GCM) token caching, fixing detached commit authors, and handling 403 Forbidden errors.
-- 🤖 **[Autonomous AI Agent Protocol (AGENT.md)](AGENT.md)** — Optimized prompt instructions for AI coding assistants (Cursor, Claude, Copilot, Antigravity) to manage your accounts automatically.
-- 🤝 **[Contributing & Testing](CONTRIBUTING.md)** — Local setup, test suite execution, and pull request guidelines.
+- 🚀 **[Complete Workflow Guide](docs/workflow.md)**: 6-phase walkthrough from `gh auth login` to daily switching and verification.
+- ⚙️ **[Configuration & Schema Guide](docs/configuration.md)**: `accounts.json` reference, private noreply emails, and real-world examples.
+- ❓ **[Troubleshooting & FAQ](docs/troubleshooting.md)**: Resolving Windows Credential Manager caching, 403 Forbidden, and detached commits.
+- 🤖 **[Autonomous AI Agent Protocol](AGENT.md)**: Prompt instructions for AI tools (Cursor, Claude, Copilot, Antigravity) to manage accounts.
+- 🤝 **[Contributing & Testing](CONTRIBUTING.md)**: Local development setup, test suite execution, and PR guidelines.
 
 ---
 

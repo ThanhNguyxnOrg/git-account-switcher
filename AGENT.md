@@ -164,7 +164,6 @@ When finishing setup, output a clean, friendly summary:
 ## 📚 Related Documentation
 
 - 🏠 [Main Project README](README.md)
-- 📚 [Documentation Hub](docs/README.md)
 - 🚀 [Complete Workflow Guide](docs/workflow.md)
 - ⚙️ [Configuration & Schema Guide](docs/configuration.md)
 - ❓ [Troubleshooting & FAQ](docs/troubleshooting.md)

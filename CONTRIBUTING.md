@@ -26,7 +26,6 @@ git-account-switcher/
 │   ├── accounts.example.json      # Generic 3-account sample configuration
 │   └── accounts.json              # Default template copied on first installation
 ├── docs/
-│   ├── README.md                  # Documentation Hub index
 │   ├── workflow.md                # 6-Phase Complete Workflow Guide
 │   ├── configuration.md           # Schema specification & real-world examples
 │   └── troubleshooting.md         # FAQ & troubleshooting solutions
@@ -138,7 +137,6 @@ The test suites verify:
 ## 📚 Related Documentation
 
 - 🏠 [Main Project README](README.md)
-- 📚 [Documentation Hub](docs/README.md)
 - 🚀 [Complete Workflow Guide](docs/workflow.md)
 - ⚙️ [Configuration & Schema Guide](docs/configuration.md)
 - ❓ [Troubleshooting & FAQ](docs/troubleshooting.md)
