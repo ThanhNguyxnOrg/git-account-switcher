@@ -81,13 +81,18 @@ gswitch add octocat work
 
 ---
 
-### Step 4: Ask the User for Role Mapping (If multiple accounts found)
+### Step 4: Ask the User for Roles & Shortcut Aliases
 Present the discovered accounts clearly to the user:
-> *"I detected these GitHub accounts on your system: `<Account1>`, `<Account2>`. Would you like to map them to specific roles (e.g., `personal`, `work`, `school`) so you can switch using simple keywords like `gswitch work`?"*
+> *"I detected these GitHub accounts on your system: `<Account1>`, `<Account2>`. What roles and shortcut aliases would you like to assign to them? (For example: `work` with shortcut `w`, `personal` with shortcut `p`, `school` with shortcut `s`)"*
 
-If the user specifies roles, either use `gswitch add <user> <key>` or edit their local configuration file at:
-- **Windows:** `C:\Users\<Username>\.config\git-account-switcher\accounts.json`
-- **macOS / Linux:** `~/.config/git-account-switcher/accounts.json`
+Once the user replies with their preferences:
+1. Assign roles and shortcut aliases using:
+   ```bash
+   gswitch alias <account> <shortcut>
+   ```
+   Or edit their local configuration file directly at:
+   - **Windows:** `C:\Users\<Username>\.config\git-account-switcher\accounts.json`
+   - **macOS / Linux:** `~/.config/git-account-switcher/accounts.json`
 
 #### Configuration File Schema:
 ```json
@@ -95,7 +100,7 @@ If the user specifies roles, either use `gswitch add <user> <key>` or edit their
   {
     "index": 1,
     "key": "personal",
-    "aliases": ["1", "personal", "octocat"],
+    "aliases": ["1", "personal", "octocat", "p"],
     "label": "Personal",
     "username": "octocat",
     "name": "Mona Lisa",

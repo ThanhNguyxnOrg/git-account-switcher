@@ -38,9 +38,26 @@
 
 ---
 
-## ⚡ Quick Start (30 Seconds)
+## ⚡ Quick Start
 
-### Step 1: Install via 1-Line Command
+Choose your preferred setup method:
+
+### 🤖 Method 1: AI Agent Auto-Setup (Zero Touch)
+
+> **Using an AI Coding Assistant?** (Cursor, Claude Code, GitHub Copilot, Antigravity, Windsurf)  
+> Copy & paste this prompt into your AI chat:
+>
+> ```text
+> Read https://github.com/ThanhNguyxnOrg/git-account-switcher/blob/master/AGENT.md and set up git-account-switcher on my machine. Check my authenticated GitHub CLI accounts, ask me what roles and shortcut aliases I want for each account, and configure everything automatically.
+> ```
+>
+> *The AI agent will autonomously read the protocol, run the installer, prompt you for your preferred nicknames/shortcuts (e.g. `work / w`, `personal / p`), and test everything for you!*
+
+---
+
+### 💻 Method 2: 1-Line Self-Installation (Manual)
+
+#### Step 1: Install via 1-Line Command
 
 **Windows (PowerShell):**
 ```powershell
@@ -52,26 +69,22 @@ irm https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master
 curl -fsSL https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/install.sh | bash
 ```
 
----
+#### Step 2: Configure Your Accounts
 
-### Step 2: Configure Your Accounts (Pick one)
-
-- **Option A (Auto-Discovery - Recommended):** If you already logged in with `gh auth login`, simply run:
+- **Auto-Discovery (Fastest):** If you already logged in with `gh auth login`, simply run:
   ```bash
   gswitch sync
   ```
-- **Option B (Setup Wizard):** Run the guided assistant:
+- **Setup Wizard:** Run the interactive assistant:
   ```bash
   gswitch setup
   ```
-- **Option C (Add Manually):**
+- **Add Accounts Manually:**
   ```bash
   gswitch add
   ```
 
----
-
-### Step 3: Switch & Code!
+#### Step 3: Switch & Code!
 
 ```bash
 gswitch personal      # Switch globally
