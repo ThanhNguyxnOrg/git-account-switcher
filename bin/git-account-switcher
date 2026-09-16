@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# git-account-switcher - Cross-platform Git & GitHub Account Switcher
+# Native Bash script for macOS, Linux, and Windows (Git Bash/WSL)
+# ==============================================================================
+
+# If running in Windows Git Bash and powershell.exe is available, pass through to powershell script
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && command -v powershell.exe >/dev/null 2>&1; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
+fi
+
+TARGET="$1"
+
+# Find configuration file
+CONFIG_PATHS=(
+    "$HOME/.config/git-account-switcher/accounts.json"
+    "$HOME/.config/switch-git/accounts.json"
+    "$(dirname "$0")/../config/accounts.json"
+    "$(dirname "$0")/accounts.json"
+)
+
+CONFIG_FILE=""
+for cp in "${CONFIG_PATHS[@]}"; do
+    if [[ -f "$cp" ]]; then
+        CONFIG_FILE="$cp"
+        break
+    fi
+done
+
+show_status() {
+    local current_gh
+    current_gh=$(gh api user --jq '.login' 2>/dev/null || echo "(not logged in / error)")
+    local current_name
+    current_name=$(git config --global user.name 2>/dev/null || echo "(not set)")
+    local current_email
+    current_email=$(git config --global user.email 2>/dev/null || echo "(not set)")
+
+    echo ""
+    echo "============================================================"
+    echo " CURRENT GITHUB & GIT IDENTITY"
+    echo "============================================================"
+    echo -e " GitHub CLI Active : \033[0;32m$current_gh\033[0m"
+    echo -e " Git Global Name   : \033[0;32m$current_name\033[0m"
+    echo -e " Git Global Email  : \033[0;32m$current_email\033[0m"
+    echo "============================================================"
+    echo ""
+}
+
+switch_account() {
+    local label="$1"
+    local username="$2"
+    local name="$3"
+    local email="$4"
+
+    echo ""
+    echo ">> Switching to account: [$label] ($username)..."
+    if ! gh auth switch -u "$username"; then
+        echo -e "\033[0;31m[ERROR] Failed to switch GitHub CLI to $username\033[0m"
+        exit 1
+    fi
+
+    git config --global user.name "$name"
+    git config --global user.email "$email"
+
+    echo -e "\033[0;32m[OK] GitHub CLI switched to : $username\033[0m"
+    echo -e "\033[0;32m[OK] Git user.name set to   : $name\033[0m"
+    echo -e "\033[0;32m[OK] Git user.email set to  : $email\033[0m"
+    echo ""
+    echo -e "\033[0;36m=> Ready to commit & push as $label!\033[0m"
+    echo ""
+}
+
+# Handle status check
+if [[ "$TARGET" == "status" || "$TARGET" == "who" || "$TARGET" == "current" || "$TARGET" == "-s" ]]; then
+    show_status
+    exit 0
+fi
+
+# Parse account via python3 or jq
+get_account_data() {
+    local query="$1"
+    if [[ -f "$CONFIG_FILE" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+            jq -r --arg q "$query" '
+                .[] | select(
+                    (.index | tostring == $q) or
+                    (.key | ascii_downcase == ($q | ascii_downcase)) or
+                    (.username | ascii_downcase == ($q | ascii_downcase)) or
+                    (.aliases[]? | ascii_downcase == ($q | ascii_downcase))
+                ) | "\(.label)\t\(.username)\t\(.name)\t\(.email)"
+            ' "$CONFIG_FILE" | head -n 1
+            return
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 -c "
+import json, sys
+q = sys.argv[1].lower()
+with open('$CONFIG_FILE') as f:
+    data = json.load(f)
+for item in data:
+    aliases = [a.lower() for a in item.get('aliases', [])]
+    if str(item.get('index')) == q or item.get('key', '').lower() == q or item.get('username', '').lower() == q or q in aliases:
+        print(f\"{item['label']}\t{item['username']}\t{item['name']}\t{item['email']}\")
+        break
+" "$query"
+            return
+        fi
+    fi
+
+    # Fallback built-in matching if no JSON parser is found
+    case "${query,,}" in
+        1|school|thanhnguyn)
+            echo -e "School\tThanhNguyn\tThanhNguyn\t253024274+ThanhNguyn@users.noreply.github.com"
+            ;;
+        2|real|realthanhnguyxn)
+            echo -e "RealThanhNguyxn\tRealThanhNguyxn\tRealThanhNguyxn\t274720769+RealThanhNguyxn@users.noreply.github.com"
+            ;;
+        3|07|thanhnguyxn07)
+            echo -e "ThanhNguyxn07\tThanhNguyxn07\tThanhNguyxn07\t272073999+ThanhNguyxn07@users.noreply.github.com"
+            ;;
+    esac
+}
+
+list_accounts() {
+    if [[ -f "$CONFIG_FILE" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r '.[] | " [\(.index)] \(.label | rpad(20)) \(.email | rpad(50)) (Command: gswitch \(.key))"' "$CONFIG_FILE" 2>/dev/null || true
+    elif [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
+        python3 -c "
+import json
+with open('$CONFIG_FILE') as f:
+    data = json.load(f)
+for item in data:
+    print(f\" [{item['index']}] {item['label']:<20} {item['email']:<52} (Command: gswitch {item['key']})\")
+"
+    else
+        echo " [1] School               253024274+ThanhNguyn@users.noreply.github.com        (Command: gswitch school)"
+        echo " [2] RealThanhNguyxn      274720769+RealThanhNguyxn@users.noreply.github.com   (Command: gswitch real)"
+        echo " [3] ThanhNguyxn07        272073999+ThanhNguyxn07@users.noreply.github.com     (Command: gswitch 07)"
+    fi
+}
+
+SELECTED=""
+if [[ -n "$TARGET" ]]; then
+    SELECTED=$(get_account_data "$TARGET")
+fi
+
+if [[ -z "$SELECTED" ]]; then
+    show_status
+    echo -e "\033[1;33mAvailable accounts:\033[0m"
+    list_accounts
+    echo ""
+    read -r -p "Select account or press Enter to cancel: " CHOICE
+    if [[ -n "$CHOICE" ]]; then
+        SELECTED=$(get_account_data "$CHOICE")
+    else
+        echo "Cancelled."
+        exit 0
+    fi
+fi
+
+if [[ -n "$SELECTED" ]]; then
+    IFS=$'\t' read -r S_LABEL S_USER S_NAME S_EMAIL <<< "$SELECTED"
+    switch_account "$S_LABEL" "$S_USER" "$S_NAME" "$S_EMAIL"
+else
+    echo -e "\033[0;31mAccount not found for '$TARGET'.\033[0m"
+    exit 1
+fi

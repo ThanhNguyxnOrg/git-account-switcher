@@ -1,4 +1,4 @@
-# switch-git ⚡
+# git-account-switcher ⚡
 
 > **The missing bridge between Git commit identities and GitHub CLI authentication.**  
 > Switch GitHub accounts, active OAuth tokens, commit authors, and private noreply emails in a single command — with zero SSH configuration needed. Works natively across **Windows**, **macOS**, and **Linux**.
@@ -24,15 +24,15 @@ Developers managing multiple GitHub accounts (e.g., **Personal**, **Work**, and 
 
 ## 💡 The Solution
 
-`switch-git` unifies both layers into an atomic, instantaneous switch:
+`git-account-switcher` unifies both layers into an atomic, instantaneous switch:
 - **Toggles GitHub CLI (`gh auth switch`):** Grants instant HTTPS push/pull permissions and repository creation capabilities under the target account.
 - **Toggles Git Identity (`git config --global`):** Updates `user.name` and `user.email` (using GitHub's privacy-protected `noreply` email).
 - **Zero SSH required:** Uses GitHub CLI as Git's native HTTPS credential helper (`git-credential`).
 
 ```
-                              ┌─────────────────────────────┐
-                              │     switch-git <account>    │
-                              └──────────────┬──────────────┘
+                         ┌────────────────────────────────────────┐
+                         │  git-account-switcher <acc> / gswitch  │
+                         └───────────────────┬────────────────────┘
                                              │
                      ┌───────────────────────┴───────────────────────┐
                      ▼                                               ▼
@@ -48,14 +48,22 @@ Developers managing multiple GitHub accounts (e.g., **Personal**, **Work**, and 
 - ⚡ **Single Command Switch:** Switch active token and git author in under 1 second.
 - 🔒 **Privacy First:** Configured out-of-the-box with GitHub's private noreply emails (`<id>+<username>@users.noreply.github.com`).
 - 🌐 **100% Cross-Platform:** Native support for Windows (PowerShell/CMD), macOS, and Linux (Bash/Zsh).
-- 🎨 **Interactive Menu:** Run `switch-git` without arguments to launch a clean terminal selector.
+- ⌨️ **Multiple CLI Commands:** Use full command `git-account-switcher`, quick alias `gswitch`, or legacy `switch-git`.
+- 🎨 **Interactive Menu:** Run `gswitch` without arguments to launch a clean terminal selector.
 - 🛠️ **Native Git Aliases:** Integrated seamlessly into `git who` and `git switch-acc`.
 - 📁 **Folder Isolation Compatible:** Fully interoperable with Git's native `includeIf` conditional configs.
-- ⚙️ **JSON Profile Management:** Profiles live in clean, portable JSON configurations (`~/.config/switch-git/accounts.json`).
+- ⚙️ **JSON Profile Management:** Profiles live in clean, portable JSON configurations (`~/.config/git-account-switcher/accounts.json`).
 
 ---
 
 ## 📦 Installation
+
+### Clone the Repository
+
+```bash
+git clone https://github.com/ThanhNguyxnOrg/git-account-switcher.git
+cd git-account-switcher
+```
 
 ### Windows (PowerShell)
 
@@ -77,7 +85,7 @@ chmod +x install.sh
 The installer will:
 1. Copy executable scripts to your local user binary path (`~/.local/bin`).
 2. Ensure `~/.local/bin` is in your environment `PATH`.
-3. Deploy your account profile configuration to `~/.config/switch-git/accounts.json`.
+3. Deploy your account profile configuration to `~/.config/git-account-switcher/accounts.json`.
 4. Configure Git's credential helper to use GitHub CLI (`gh auth git-credential`).
 5. Register global Git aliases: `git who` and `git switch-acc`.
 
@@ -87,17 +95,19 @@ The installer will:
 
 ### 1. Fast Switch via Keywords or Index
 
+You can use either `git-account-switcher` or the short alias `gswitch`:
+
 ```bash
-switch-git school     # Switch to Academic / School account
-switch-git real       # Switch to Primary / Personal account
-switch-git 07         # Switch to Secondary / Work account
+gswitch school        # Switch to Academic / School account
+gswitch real          # Switch to Primary / Personal account
+gswitch 07            # Switch to Secondary / Work account
 ```
 
-*(You can also use index numbers: `switch-git 1`, `switch-git 2`, `switch-git 3`)*
+*(You can also use index numbers: `gswitch 1`, `gswitch 2`, `gswitch 3`)*
 
 ### 2. Interactive Selection Menu
 
-Simply run `switch-git` with no arguments:
+Simply run `gswitch` (or `git-account-switcher`) with no arguments:
 
 ```text
 ============================================================
@@ -109,9 +119,9 @@ Simply run `switch-git` with no arguments:
 ============================================================
 
 Available accounts:
- [1] School               253024274+ThanhNguyn@users.noreply.github.com        (Command: switch-git school)
- [2] RealThanhNguyxn      274720769+RealThanhNguyxn@users.noreply.github.com   (Command: switch-git real)
- [3] ThanhNguyxn07        272073999+ThanhNguyxn07@users.noreply.github.com     (Command: switch-git 07)
+ [1] School               253024274+ThanhNguyn@users.noreply.github.com        (Command: gswitch school)
+ [2] RealThanhNguyxn      274720769+RealThanhNguyxn@users.noreply.github.com   (Command: gswitch real)
+ [3] ThanhNguyxn07        272073999+ThanhNguyxn07@users.noreply.github.com     (Command: gswitch 07)
 
 Select account [1-3] or press Enter to cancel: 
 ```
@@ -119,7 +129,7 @@ Select account [1-3] or press Enter to cancel:
 ### 3. Check Current Identity
 
 ```bash
-switch-git status
+gswitch status
 # or with Git alias:
 git who
 ```
@@ -138,7 +148,7 @@ git who
 
 Account profiles are stored in:
 ```
-~/.config/switch-git/accounts.json
+~/.config/git-account-switcher/accounts.json
 ```
 
 ### Schema Example:
@@ -199,7 +209,7 @@ And inside `C:/Users/YourUser/.gitconfig-school`:
 
 With this setup:
 - Any commit made inside `D:/University/` is **permanently guaranteed** to commit under your school identity.
-- When creating repos or pushing remotely, simply run `switch-git school` to align your GitHub CLI token!
+- When creating repos or pushing remotely, simply run `gswitch school` to align your GitHub CLI token!
 
 ---
 

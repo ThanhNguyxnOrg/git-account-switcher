@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# switch-git Installer for macOS and Linux
+# git-account-switcher Installer for macOS and Linux
 # ==============================================================================
 set -e
 
 echo ""
 echo "============================================================"
-echo " switch-git Installer (macOS & Linux)"
+echo " git-account-switcher Installer (macOS & Linux)"
 echo " Fast Multi-Account GitHub & Git Identity Switcher"
 echo "============================================================"
 echo ""
@@ -32,9 +32,11 @@ echo "[2/5] Preparing installation directory ($BIN_DIR)..."
 mkdir -p "$BIN_DIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cp "$SCRIPT_DIR/bin/git-account-switcher" "$BIN_DIR/git-account-switcher"
+cp "$SCRIPT_DIR/bin/gswitch" "$BIN_DIR/gswitch"
 cp "$SCRIPT_DIR/bin/switch-git" "$BIN_DIR/switch-git"
-chmod +x "$BIN_DIR/switch-git"
-echo "  [OK] Installed switch-git -> $BIN_DIR/switch-git"
+chmod +x "$BIN_DIR/git-account-switcher" "$BIN_DIR/gswitch" "$BIN_DIR/switch-git"
+echo "  [OK] Installed executables -> $BIN_DIR (git-account-switcher, gswitch, switch-git)"
 
 # Check if ~/.local/bin is in PATH
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
@@ -45,7 +47,7 @@ fi
 
 # 3. Setup configuration directory
 echo "[3/5] Setting up accounts configuration..."
-CONFIG_DIR="$HOME/.config/switch-git"
+CONFIG_DIR="$HOME/.config/git-account-switcher"
 mkdir -p "$CONFIG_DIR"
 
 if [[ ! -f "$CONFIG_DIR/accounts.json" ]]; then
@@ -69,8 +71,8 @@ echo "  [OK] Git credential helper linked to GitHub CLI (gh)."
 
 # 5. Configure Git aliases
 echo "[5/5] Setting up Git aliases..."
-git config --global alias.who '!switch-git status'
-git config --global alias.switch-acc '!switch-git'
+git config --global alias.who '!git-account-switcher status'
+git config --global alias.switch-acc '!git-account-switcher'
 echo "  [OK] Added git alias: git who"
 echo "  [OK] Added git alias: git switch-acc"
 
@@ -79,9 +81,10 @@ echo "============================================================"
 echo " Installation Complete!"
 echo "============================================================"
 echo "Run from any terminal:"
-echo "  switch-git              # Interactive selection"
-echo "  switch-git <account>    # Quick switch"
-echo "  switch-git status       # Check current identity"
-echo "  git who                 # Git alias for status"
-echo "  git switch-acc <acc>    # Git alias for switching"
+echo "  git-account-switcher <account>   # Full command"
+echo "  gswitch <account>                # Short alias"
+echo "  gswitch                          # Interactive selector"
+echo "  gswitch status                   # Check current identity"
+echo "  git who                          # Git alias for status"
+echo "  git switch-acc <acc>             # Git alias for switching"
 echo ""

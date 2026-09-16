@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Uninstalls switch-git from the local user environment.
+    Uninstalls git-account-switcher from the local user environment.
 #>
 
 [CmdletBinding()]
@@ -9,10 +9,14 @@ param(
 )
 
 Write-Host ""
-Write-Host "Uninstalling switch-git..." -ForegroundColor Yellow
+Write-Host "Uninstalling git-account-switcher..." -ForegroundColor Yellow
 
 $binDir = "$HOME\.local\bin"
-$filesToRemove = @("switch-git.ps1", "switch-git.cmd", "switch-git")
+$filesToRemove = @(
+    "git-account-switcher.ps1", "git-account-switcher.cmd", "git-account-switcher",
+    "gswitch.cmd", "gswitch",
+    "switch-git.ps1", "switch-git.cmd", "switch-git"
+)
 
 foreach ($file in $filesToRemove) {
     $targetPath = Join-Path $binDir $file
@@ -28,10 +32,15 @@ git config --global --unset alias.switch-acc 2>$null
 Write-Host "[OK] Removed git aliases (git who, git switch-acc)" -ForegroundColor Green
 
 if ($PurgeConfig) {
-    $configDir = "$HOME\.config\switch-git"
-    if (Test-Path $configDir) {
-        Remove-Item -Path $configDir -Recurse -Force
-        Write-Host "[OK] Removed configuration directory: $configDir" -ForegroundColor Green
+    $configDirs = @(
+        "$HOME\.config\git-account-switcher",
+        "$HOME\.config\switch-git"
+    )
+    foreach ($cd in $configDirs) {
+        if (Test-Path $cd) {
+            Remove-Item -Path $cd -Recurse -Force
+            Write-Host "[OK] Removed configuration directory: $cd" -ForegroundColor Green
+        }
     }
 }
 
