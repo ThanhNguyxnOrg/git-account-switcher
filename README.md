@@ -135,6 +135,27 @@ Configured Account Profiles (3):
 
 ---
 
+## 📂 Optional Power Feature: Automatic Folder Binding (`gswitch bind`)
+
+> **Don't want to switch accounts manually every time?**  
+> You can permanently bind an entire directory (e.g., your company projects or university coursework) to a specific account. Every Git repository created or opened inside that folder will automatically commit under that identity using Git's native `includeIf` conditional includes.
+
+```bash
+# 1. Bind an entire folder to an account profile
+gswitch bind D:\Code\Work work         # Windows
+gswitch bind ~/work work              # macOS / Linux
+
+# 2. View all active folder bindings on your machine
+gswitch bindings
+
+# 3. Remove a folder binding
+gswitch unbind D:\Code\Work
+```
+
+*For more details, see the [Configuration Guide](docs/configuration.md#📂-automatic-folder-isolation-gswitch-bind--includeif).*
+
+---
+
 ## 📚 Documentation
 
 - 🚀 **[Complete Workflow Guide](docs/workflow.md)**: 6-phase walkthrough from `gh auth login` to daily switching and verification.
