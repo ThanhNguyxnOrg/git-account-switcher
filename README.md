@@ -135,24 +135,58 @@ Configured Account Profiles (3):
 
 ---
 
-## 📂 Optional Power Feature: Automatic Folder Binding (`gswitch bind`)
+## 📂 Optional Power Feature: Folder-Based Isolation (Set & Forget)
 
-> **Don't want to switch accounts manually every time?**  
-> You can permanently bind an entire directory (e.g., your company projects or university coursework) to a specific account. Every Git repository created or opened inside that folder will automatically commit under that identity using Git's native `includeIf` conditional includes.
+> 💡 **100% Optional:** For most users, standard global switching (`gswitch work`) or repo-local switching (`gswitch -l work`) is all you need.  
+> However, if you organize your code into dedicated folders (e.g., all company projects in `D:\Code\Work` and personal projects in `D:\Code\Personal`), you can bind an entire folder to an account so you **never have to switch manually**.
 
+### How It Works:
+`gswitch bind` leverages Git's native conditional includes (`includeIf`). Every repository inside the bound directory (including newly cloned ones) automatically commits under that account's name and email.
+
+### Quick Step-by-Step Guide:
+
+#### 1. Bind a Folder to an Account Profile
 ```bash
-# 1. Bind an entire folder to an account profile
-gswitch bind D:\Code\Work work         # Windows
-gswitch bind ~/work work              # macOS / Linux
+# Windows
+gswitch bind D:\Code\Work work
+gswitch bind D:\Code\Personal personal
 
-# 2. View all active folder bindings on your machine
+# macOS / Linux
+gswitch bind ~/work work
+gswitch bind ~/personal personal
+```
+
+#### 2. Verify It Works (`git who`)
+Navigate to any repository inside that directory and check your identity:
+```bash
+cd D:\Code\Work\any-project
+git who
+```
+`git who` automatically detects the conditional rule:
+```text
+============================================================
+ CURRENT GITHUB & GIT IDENTITY
+============================================================
+ GitHub CLI Active : mona-corp
+ Git Global Name   : Mona Personal
+ Git Global Email  : 583231+octocat@users.noreply.github.com
+ ------------------------------------------------------------
+ [Folder Override via includeIf detected]
+ Git Folder Name   : Mona Corporate
+ Git Folder Email  : mona@enterprise.com
+============================================================
+```
+
+#### 3. List or Remove Bindings Anytime
+```bash
+# View all folder-to-account rules registered on your machine:
 gswitch bindings
 
-# 3. Remove a folder binding
+# Remove a binding when a project folder is archived or moved:
 gswitch unbind D:\Code\Work
 ```
 
-*For more details, see the [Configuration Guide](docs/configuration.md#📂-automatic-folder-isolation-gswitch-bind--includeif).*
+*For multi-account JSON examples and technical details, see the [Configuration Guide](docs/configuration.md#📂-automatic-folder-isolation-gswitch-bind--includeif).*
 
 ---
 

@@ -141,6 +141,7 @@ Before completing your response to the user, run these non-destructive checks:
 | **Windows Credential Manager Conflict** | Git pushes as old account despite switching | Run `git config --global --unset-all credential.helper` followed by `git config --global credential.helper ""` and `git config --global --add credential.helper "!gh auth git-credential"`. |
 | **Expired Token** | `gh api` returns 401 Unauthorized | Run `gh auth refresh -h github.com`. |
 | **Repository-Local Work** | User only wants to change email for 1 repo | Instruct the user to run `cd <repo> && gswitch -l <key>`. |
+| **Folder-Specific Separation** | User wants all repos in a folder bound to one account | Run `gswitch bind <dir> <account>` (Optional set-and-forget power feature). |
 
 ---
 
