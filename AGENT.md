@@ -1,10 +1,35 @@
 # AI Agent Setup & Operations Guide (Cursor, Claude Code, Copilot, Antigravity, ChatGPT)
 
-> **For AI Assistants:** When a user asks you to set up, configure, add accounts, or troubleshoot `git-account-switcher` on their machine, follow this autonomous protocol. Avoid making the user run manual commands unless interactive browser login is required.
+> **For AI Coding Assistants:** When a user asks you to set up, configure, add accounts, or troubleshoot `git-account-switcher` on their machine, follow this autonomous protocol. Avoid making the user run manual commands unless interactive browser login is required.
+
+[![Platform: Cross-Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue.svg)](README.md)
+[![Status: Autonomous Ready](https://img.shields.io/badge/Autonomous%20Protocol-Ready-green.svg)](AGENT.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey.svg)](LICENSE)
 
 ---
 
-## Autonomous Setup Protocol
+## 🧠 System Architecture Overview
+
+`git-account-switcher` operates at two complementary layers:
+
+```
+                          ┌────────────────────────────────────────┐
+                          │  git-account-switcher <acc> / gswitch  │
+                          └───────────────────┬────────────────────┘
+                                              │
+                      ┌───────────────────────┴───────────────────────┐
+                      ▼                                               ▼
+          [GitHub Server Token]                             [Local Git Identity]
+            gh auth switch -u                           git config (--global / --local)
+       Push/Pull HTTPS Permissions                     user.name & user.email (noreply)
+```
+
+1. **GitHub CLI Authentication Layer:** Swaps active OAuth tokens via `gh auth switch -u <username>`. This controls HTTPS push/pull permissions and repository API access.
+2. **Git Commit Authorship Layer:** Swaps `user.name` and `user.email` (using GitHub's privacy-protected noreply email format `<id>+<username>@users.noreply.github.com`) globally or locally within `.git/config`.
+
+---
+
+## 🤖 Autonomous Setup Protocol
 
 ### Step 1: Inspect System Environment
 Execute non-intrusive terminal checks:
@@ -82,23 +107,54 @@ If the user specifies roles, either use `gswitch add <user> <key>` or edit their
 
 ---
 
-### Step 5: Verification & Hand-off
-1. Verify configured accounts:
+### Step 5: Verification & Self-Testing Checklist
+Before completing your response to the user, run these non-destructive checks:
+1. **List configured profiles:**
    ```bash
    gswitch list
    ```
-2. Confirm active account:
+2. **Confirm active identity:**
    ```bash
    gswitch status
    ```
-3. Test help output:
+3. **Verify help output:**
    ```bash
    gswitch help
    ```
-4. Provide the user with a concise summary of how to use it:
-   - `gswitch <key>`: Switch globally (e.g. `gswitch work`, `gswitch 1`).
-   - `gswitch -l <key>`: Switch locally for the current repository only.
-   - `gswitch`: Open interactive menu.
-   - `gswitch add <user> <key>`: Add an account.
-   - `gswitch remove <key> -f`: Remove an account.
-   - `git who`: Git alias to view active identity.
+4. **Run integration test suite (optional verification):**
+   - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-all.ps1`
+   - Unix: `bash ./tests/test-all.sh`
+
+---
+
+## 🛠️ Edge Cases & AI Remediation
+
+| Scenario | Symptom | Remediation Action |
+| :--- | :--- | :--- |
+| **Missing `gh` CLI** | Command not found: `gh` | Install via `winget install --id GitHub.cli` (Windows) or `brew install gh` (macOS), then restart terminal. |
+| **No Logged-In Accounts** | `gh auth status` returns "You are not logged in" | Ask the user to run `gh auth login` in their terminal to complete the web browser OAuth flow. |
+| **Windows Credential Manager Conflict** | Git pushes as old account despite switching | Run `git config --global --unset-all credential.helper` followed by `git config --global credential.helper ""` and `git config --global --add credential.helper "!gh auth git-credential"`. |
+| **Expired Token** | `gh api` returns 401 Unauthorized | Run `gh auth refresh -h github.com`. |
+| **Repository-Local Work** | User only wants to change email for 1 repo | Instruct the user to run `cd <repo> && gswitch -l <key>`. |
+
+---
+
+## 📋 Agent Response Summary Template
+
+When finishing setup, output a clean, friendly summary:
+
+```markdown
+✅ **git-account-switcher has been successfully installed and configured!**
+
+- **Active Identity:** `<Active Username>` (`<Active Email>`)
+- **Configured Profiles:**
+  - `gswitch personal` (or `gswitch 1`) -> `<Username 1>`
+  - `gswitch work` (or `gswitch 2`) -> `<Username 2>`
+
+**Quick Commands:**
+- `gswitch <key>`: Switch globally across your system.
+- `gswitch -l <key>`: Switch locally for the current repository only.
+- `gswitch`: Open interactive selection menu.
+- `git who`: Check active token and Git commit authorship.
+- `gswitch help`: View all commands and flags.
+```

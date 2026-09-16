@@ -23,6 +23,7 @@
 - [📂 Bonus: Automatic Folder Isolation (`includeIf`)](#-bonus-automatic-folder-isolation-includeif)
 - [💻 Local Development & Testing](#-local-development--testing)
 - [🤝 Contributing](#-contributing)
+- [❓ FAQ & Troubleshooting](#-frequently-asked-questions--troubleshooting)
 - [🗑️ Uninstallation](#️-uninstallation)
 - [📄 License](#-license)
 
@@ -561,6 +562,63 @@ We welcome community contributions! Please read our [CONTRIBUTING.md](CONTRIBUTI
 - How to create sandbox tests for new features
 - Conventional commit conventions
 - Submitting Pull Requests
+
+---
+
+## ❓ Frequently Asked Questions & Troubleshooting
+
+### Q: Why does `git-account-switcher` use GitHub CLI (`gh`) credentials instead of Git Credential Manager (GCM)?
+**A:** Traditional Git Credential Manager (GCM) stores one Windows Credential / Keychain token per hostname (`github.com`). When you attempt to work with multiple GitHub accounts, GCM frequently forces you to re-login, triggers modal login popups, or pushes with the wrong token.  
+`git-account-switcher` delegates Git credentials to GitHub CLI's `gh auth git-credential`. Because `gh` manages multiple simultaneous authenticated sessions, swapping accounts is an instant atomic command (`gh auth switch -u <user>`).
+
+---
+
+### Q: How do private GitHub noreply emails work, and why are they recommended?
+**A:** GitHub provides every user with an official privacy email formatted as:  
+`<id>+<username>@users.noreply.github.com`  
+Using this email in Git commits:
+1. Keeps your personal and corporate email addresses private from web scrapers and public Git logs.
+2. Correctly matches commits to your GitHub user profile, rendering your user avatar.
+3. Automatically increments your GitHub contribution activity graph ("green squares").
+
+> [!TIP]
+> You can retrieve your account's numeric GitHub user ID at any time by running:
+> ```bash
+> gh api user --jq .id
+> ```
+
+---
+
+### Q: How does the `-l` / `--local` flag differ from global switching?
+**A:**
+- **Global (`gswitch work`):** Updates `user.name` and `user.email` in `~/.gitconfig` (affects your whole system) and switches the active GitHub CLI token.
+- **Local (`gswitch -l work`):** Updates `user.name` and `user.email` **only inside `.git/config` of the current repository**. Your system-wide Git configuration remains untouched, while your active GitHub CLI token is switched so remote pushes succeed under the work account.
+
+---
+
+### Q: What should I do if `git push` fails with "Authentication Failed" or 403?
+**A:** Follow this quick checklist:
+1. Verify who is currently active:
+   ```bash
+   git who
+   ```
+2. If your GitHub CLI token has expired or is invalid, refresh it:
+   ```bash
+   gh auth refresh -h github.com
+   ```
+3. Confirm that Git's credential helper is configured to use GitHub CLI:
+   ```bash
+   git config --get-all credential.helper
+   ```
+   *The output should end with `!gh auth git-credential` (or `!'C:\Program Files\GitHub CLI\gh.exe' auth git-credential` on Windows).*
+
+---
+
+### Q: Can I use custom domain emails for work instead of noreply emails?
+**A:** Yes! You can provide any valid email in `accounts.json` (such as `mona@enterprise.com`), or configure it directly via:
+```bash
+gswitch add <username> <key> "Mona Octocat" "mona@enterprise.com"
+```
 
 ---
 
