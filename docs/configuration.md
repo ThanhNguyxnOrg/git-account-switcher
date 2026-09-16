@@ -194,15 +194,15 @@ Open `https://api.github.com/users/<your-username>` and look for the `"id"` fiel
 
 ## 📂 Automatic Folder Isolation (`gswitch bind` / `includeIf`)
 
-If you want all Git repositories inside a specific folder (e.g. `D:\Code\Work` or `~/work`) to **permanently and automatically commit as a specific account**, `gswitch` provides built-in automated folder binding using Git's native `includeIf` mechanism:
+If you want all Git repositories inside a specific folder (e.g. `C:\Projects\Work` or `~/projects/work`) to **permanently and automatically commit as a specific account**, `gswitch` provides built-in automated folder binding using Git's native `includeIf` mechanism:
 
 ### 1. Bind a Folder to an Account
 ```bash
-# Windows
-gswitch bind D:\Code\Work work
+# Windows (replace with your target folder path)
+gswitch bind C:\Projects\Work work
 
 # macOS / Linux
-gswitch bind ~/work work
+gswitch bind ~/projects/work work
 ```
 
 *What happens under the hood:*  
@@ -215,7 +215,7 @@ gswitch bindings
 
 ### 3. Remove a Folder Binding
 ```bash
-gswitch unbind D:\Code\Work
+gswitch unbind C:\Projects\Work
 ```
 
 > **Why you still use `gswitch` for GitHub CLI:**  

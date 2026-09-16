@@ -138,7 +138,7 @@ Configured Account Profiles (3):
 ## 📂 Optional Power Feature: Folder-Based Isolation (Set & Forget)
 
 > 💡 **100% Optional:** For most users, standard global switching (`gswitch work`) or repo-local switching (`gswitch -l work`) is all you need.  
-> However, if you organize your code into dedicated folders (e.g., all company projects in `D:\Code\Work` and personal projects in `D:\Code\Personal`), you can bind an entire folder to an account so you **never have to switch manually**.
+> However, if you organize your code into dedicated folders (e.g., all company projects in `C:\Projects\Work` and personal projects in `C:\Projects\Personal`), you can bind an entire folder to an account so you **never have to switch manually**.
 
 ### How It Works:
 `gswitch bind` leverages Git's native conditional includes (`includeIf`). Every repository inside the bound directory (including newly cloned ones) automatically commits under that account's name and email.
@@ -146,20 +146,21 @@ Configured Account Profiles (3):
 ### Quick Step-by-Step Guide:
 
 #### 1. Bind a Folder to an Account Profile
+Replace the path with your own target directory:
 ```bash
 # Windows
-gswitch bind D:\Code\Work work
-gswitch bind D:\Code\Personal personal
+gswitch bind C:\Projects\Work work
+gswitch bind C:\Projects\Personal personal
 
 # macOS / Linux
-gswitch bind ~/work work
-gswitch bind ~/personal personal
+gswitch bind ~/projects/work work
+gswitch bind ~/projects/personal personal
 ```
 
 #### 2. Verify It Works (`git who`)
 Navigate to any repository inside that directory and check your identity:
 ```bash
-cd D:\Code\Work\any-project
+cd C:\Projects\Work\any-project
 git who
 ```
 `git who` automatically detects the conditional rule:
@@ -183,7 +184,7 @@ git who
 gswitch bindings
 
 # Remove a binding when a project folder is archived or moved:
-gswitch unbind D:\Code\Work
+gswitch unbind C:\Projects\Work
 ```
 
 *For multi-account JSON examples and technical details, see the [Configuration Guide](docs/configuration.md#📂-automatic-folder-isolation-gswitch-bind--includeif).*

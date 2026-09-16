@@ -151,18 +151,18 @@ Select account [1-2], 's' to sync, 'a' to add, 'e' to edit, or Enter to cancel:
 
 ### 4. Optional Power Feature: Automatic Folder Isolation (Set & Forget)
 
-If you organize your projects into separate directories (e.g., all company projects in `D:\Code\Work` and personal code in `D:\Code\Personal`), you can permanently bind directories to accounts so Git automatically switches identity without any manual command:
+If you organize your projects into separate directories (e.g., all company projects in `C:\Projects\Work` and personal code in `C:\Projects\Personal`), you can permanently bind directories to accounts so Git automatically switches identity without any manual command:
 
 ```bash
-# 1. Bind directory to account profile:
-gswitch bind D:\Code\Work work          # Windows
-gswitch bind ~/work work               # macOS / Linux
+# 1. Bind directory to account profile (replace with your folder path):
+gswitch bind C:\Projects\Work work          # Windows
+gswitch bind ~/projects/work work          # macOS / Linux
 
 # 2. View all active folder bindings:
 gswitch bindings
 
 # 3. Remove a binding when no longer needed:
-gswitch unbind D:\Code\Work
+gswitch unbind C:\Projects\Work
 ```
 
 *Inside any bound directory, `git who` will automatically detect and report `[Folder Override via includeIf detected]`.*

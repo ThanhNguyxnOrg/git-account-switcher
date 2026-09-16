@@ -542,7 +542,7 @@ function Open-ConfigEditor {
 
 function Bind-FolderToAccount([string]$folderPath, [string]$targetAccount) {
     if (-not $folderPath) {
-        $folderPath = Read-Host "Enter folder path to bind (e.g. D:\Code\Work or ~/work)"
+        $folderPath = Read-Host "Enter folder path to bind (e.g. C:\Projects\Work or ~/projects/work)"
     }
     if (-not $folderPath) {
         Write-Host "Cancelled: folder path cannot be empty." -ForegroundColor Gray
@@ -822,8 +822,8 @@ function Show-HelpMessage {
     Write-Host "  gswitch -l work                     # Apply 'work' author to THIS repository only" -ForegroundColor Gray
     Write-Host "  gswitch alias work w                # Add shortcut alias 'w' to work account" -ForegroundColor Gray
     Write-Host "  gswitch unalias work w              # Remove shortcut alias 'w' from work" -ForegroundColor Gray
-    Write-Host "  gswitch bind D:\Code\Work work      # All repos in D:\Code\Work commit as work" -ForegroundColor Gray
-    Write-Host "  gswitch unbind D:\Code\Work         # Remove folder binding" -ForegroundColor Gray
+    Write-Host "  gswitch bind C:\Projects\Work work  # All repos in C:\Projects\Work commit as work" -ForegroundColor Gray
+    Write-Host "  gswitch unbind C:\Projects\Work     # Remove folder binding" -ForegroundColor Gray
     Write-Host "  gswitch bindings                    # View all active folder bindings" -ForegroundColor Gray
     Write-Host "  gswitch edit                        # Open accounts.json in editor" -ForegroundColor Gray
     Write-Host "  gswitch sync                        # Auto-import all accounts from 'gh auth status'" -ForegroundColor Gray
