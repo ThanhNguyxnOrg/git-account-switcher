@@ -321,13 +321,29 @@ if (-not $targetArg) {
 # Resolve target account
 $selected = $null
 $cleanTarget = $targetArg.Trim().ToLower()
+
+# 1. Exact match
 foreach ($a in $accounts) {
+    $aliasesLower = @($a.AliasList | ForEach-Object { $_.ToString().ToLower() })
     if ($a.Index.ToString() -eq $cleanTarget -or `
         $a.Key.ToLower() -eq $cleanTarget -or `
         $a.Username.ToLower() -eq $cleanTarget -or `
-        ($a.AliasList -contains $cleanTarget)) {
+        ($aliasesLower -contains $cleanTarget)) {
         $selected = $a
         break
+    }
+}
+
+# 2. Fuzzy match fallback
+if (-not $selected) {
+    foreach ($a in $accounts) {
+        if ($a.Username.ToLower().Contains($cleanTarget) -or `
+            $cleanTarget.Contains($a.Username.ToLower()) -or `
+            $a.Key.ToLower().Contains($cleanTarget) -or `
+            $cleanTarget.Contains($a.Key.ToLower())) {
+            $selected = $a
+            break
+        }
     }
 }
 

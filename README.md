@@ -6,8 +6,21 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows | macOS | Linux](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
 [![Shell: PowerShell | Bash | Zsh](https://img.shields.io/badge/Shell-PowerShell%20%7C%20Bash%20%7C%20Zsh-blueviolet.svg)]()
+[![AI Agent Ready](https://img.shields.io/badge/AI%20Agent-Ready-9cf.svg)](AGENT.md)
 [![Git: >= 2.13](https://img.shields.io/badge/Git-%3E%3D%202.13-orange.svg)](https://git-scm.com/)
 [![GitHub CLI: >= 2.24](https://img.shields.io/badge/GitHub%20CLI-%3E%3D%202.24-green.svg)](https://cli.github.com/)
+
+---
+
+## 🤖 AI-Native Setup (For Cursor, Claude Code, Copilot, Antigravity, ChatGPT)
+
+Using an AI coding assistant? You don't even need to run commands manually. Simply copy and paste this prompt to your AI:
+
+```text
+Set up git-account-switcher on my machine from: https://github.com/ThanhNguyxnOrg/git-account-switcher
+```
+
+Your AI will read [`AGENT.md`](AGENT.md), check prerequisites, execute the 1-line installer, auto-discover your accounts via `gswitch sync`, and configure everything autonomously!
 
 ---
 
@@ -59,6 +72,17 @@ Developers managing multiple GitHub accounts (e.g., **Personal**, **Work**, and 
 ---
 
 ## 📦 Installation
+
+### Prerequisites
+Before installing, ensure you have:
+1. **Git** installed: [git-scm.com](https://git-scm.com/)
+2. **GitHub CLI (`gh`)** installed and authenticated: [cli.github.com](https://cli.github.com/)
+   ```bash
+   # Login to your accounts (repeat for each account):
+   gh auth login
+   ```
+
+---
 
 ### 1-Line Quick Install (No git clone required)
 
@@ -175,9 +199,8 @@ gswitch list
 ## 🔧 Profile Configuration (`accounts.json`)
 
 Account profiles are stored in:
-```
-~/.config/git-account-switcher/accounts.json
-```
+- **Windows:** `C:\Users\<User>\.config\git-account-switcher\accounts.json`
+- **macOS / Linux:** `~/.config/git-account-switcher/accounts.json`
 
 ### Schema Example:
 
