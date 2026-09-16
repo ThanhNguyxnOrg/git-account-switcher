@@ -147,46 +147,81 @@ print(f'[OK] Successfully synced {len(result)} accounts to $CONFIG_FILE!')
 }
 
 add_account() {
+    local passed_user="$1"
+    local passed_key="$2"
+    local passed_name="$3"
+    local passed_email="$4"
+
     echo ""
-    echo "=== Add New GitHub Account Profile ==="
-    read -r -p "Enter GitHub Username: " USERNAME
-    if [[ -z "$USERNAME" ]]; then
-        echo "Cancelled."
+    echo -e "\033[0;36m=== Add New GitHub Account Profile ===\033[0m"
+
+    local username="$passed_user"
+    if [[ -z "$username" ]]; then
+        read -r -p "Enter GitHub Username: " username
+    fi
+    if [[ -z "$username" ]]; then
+        echo "Cancelled: username cannot be empty."
         return
     fi
 
-    read -r -p "Enter role/key (e.g. work, personal, school) [default: ${USERNAME,,}]: " KEY
-    KEY=${KEY:-${USERNAME,,}}
-
-    read -r -p "Enter display label [default: $USERNAME]: " LABEL
-    LABEL=${LABEL:-$USERNAME}
-
     local uid="0"
-    local uname="$USERNAME"
+    local uname="$username"
     if command -v gh >/dev/null 2>&1; then
-        out=$(gh api "users/$USERNAME" 2>/dev/null || true)
+        out=$(gh api "users/$username" 2>/dev/null || true)
         if [[ -n "$out" ]]; then
             uid=$(python3 -c "import json, sys; print(json.loads(sys.argv[1]).get('id', 0))" "$out" 2>/dev/null || echo "0")
-            uname=$(python3 -c "import json, sys; print(json.loads(sys.argv[1]).get('name') or sys.argv[2])" "$out" "$USERNAME" 2>/dev/null || echo "$USERNAME")
+            uname=$(python3 -c "import json, sys; print(json.loads(sys.argv[1]).get('name') or sys.argv[2])" "$out" "$username" 2>/dev/null || echo "$username")
         fi
     fi
 
-    read -r -p "Enter commit author name [default: $uname]: " COMMIT_NAME
-    COMMIT_NAME=${COMMIT_NAME:-$uname}
+    local key="$passed_key"
+    if [[ -z "$key" ]]; then
+        if [[ -n "$passed_user" ]]; then
+            key="${username,,}"
+        else
+            read -r -p "Enter role/key (e.g. work, personal, school) [default: ${username,,}]: " key
+            key=${key:-${username,,}}
+        fi
+    fi
+
+    local label=""
+    if [[ -n "$passed_user" && -n "$passed_key" ]]; then
+        label="${key^}"
+    else
+        read -r -p "Enter display label [default: $username]: " label
+        label=${label:-$username}
+    fi
+
+    local commit_name="$passed_name"
+    if [[ -z "$commit_name" ]]; then
+        if [[ -n "$passed_user" && -n "$passed_key" ]]; then
+            commit_name="$uname"
+        else
+            read -r -p "Enter commit author name [default: $uname]: " commit_name
+            commit_name=${commit_name:-$uname}
+        fi
+    fi
 
     local def_email
     if [[ "$uid" != "0" ]]; then
-        def_email="${uid}+${USERNAME}@users.noreply.github.com"
+        def_email="${uid}+${username}@users.noreply.github.com"
     else
-        def_email="${USERNAME}@users.noreply.github.com"
+        def_email="${username}@users.noreply.github.com"
     fi
 
-    read -r -p "Enter commit email [default: $def_email]: " COMMIT_EMAIL
-    COMMIT_EMAIL=${COMMIT_EMAIL:-$def_email}
+    local commit_email="$passed_email"
+    if [[ -z "$commit_email" ]]; then
+        if [[ -n "$passed_user" && -n "$passed_key" ]]; then
+            commit_email="$def_email"
+        else
+            read -r -p "Enter commit email [default: $def_email]: " commit_email
+            commit_email=${commit_email:-$def_email}
+        fi
+    fi
 
     mkdir -p "$CONFIG_DIR"
     python3 -c "
-import json, os
+import json, os, sys
 cfg = '$CONFIG_FILE'
 data = []
 if os.path.exists(cfg):
@@ -194,27 +229,40 @@ if os.path.exists(cfg):
         with open(cfg) as f: data = json.load(f)
     except: pass
 
+u = sys.argv[1]
+k = sys.argv[2].lower()
+lbl = sys.argv[3]
+cn = sys.argv[4]
+ce = sys.argv[5]
+
+# Remove existing if same key or username to prevent duplicates
+data = [a for a in data if a.get('key','').lower() != k and a.get('username','').lower() != u.lower()]
+
 idx = len(data) + 1
 data.append({
     'index': idx,
-    'key': '$KEY',
-    'aliases': [str(idx), '$KEY', '${USERNAME,,}'],
-    'label': '$LABEL',
-    'username': '$USERNAME',
-    'name': '$COMMIT_NAME',
-    'email': '$COMMIT_EMAIL',
-    'description': '$LABEL account ($USERNAME)'
+    'key': k,
+    'aliases': [str(idx), k, u.lower()],
+    'label': lbl,
+    'username': u,
+    'name': cn,
+    'email': ce,
+    'description': f'{lbl} account ({u})'
 })
 with open(cfg, 'w') as f: json.dump(data, f, indent=2)
-print('[OK] Added account successfully!')
-"
+print(f'[OK] Account \'{lbl}\' ({u}) successfully configured!')
+" "$username" "$key" "$label" "$commit_name" "$commit_email"
+
     show_list
 }
 
 remove_account() {
     local target="$1"
+    local force="$2"
+
     if [[ -z "$target" ]]; then
-        read -r -p "Enter account number, key, or username to remove: " target
+        show_list
+        read -r -p "Enter account number, key, or username to remove (or Enter to cancel): " target
     fi
     if [[ -z "$target" ]]; then
         echo "Cancelled."
@@ -224,27 +272,89 @@ remove_account() {
     python3 -c "
 import json, sys
 cfg = '$CONFIG_FILE'
-with open(cfg) as f: data = json.load(f)
-q = sys.argv[1].lower()
-match = None
-for a in data:
-    if str(a.get('index')) == q or a.get('key','').lower() == q or a.get('username','').lower() == q:
-        match = a
-        break
-if not match:
-    print(f'[ERROR] Account \"{q}\" not found.')
+try:
+    with open(cfg) as f: data = json.load(f)
+except Exception:
+    print('[ERROR] Config file not found.')
     sys.exit(1)
 
-conf = input(f\"Are you sure you want to remove '{match['label']}' ({match['username']})? [y/N]: \")
-if conf.lower() == 'y':
+q = sys.argv[1].lower()
+force = (sys.argv[2].lower() in ['true', '1', 'yes'])
+match = None
+for a in data:
+    aliases = [str(x).lower() for x in a.get('aliases', [])]
+    if str(a.get('index')) == q or a.get('key','').lower() == q or a.get('username','').lower() == q or q in aliases:
+        match = a
+        break
+
+if not match:
+    print(f'[ERROR] Account \"{q}\" not found. Run \"gswitch list\" to view accounts.')
+    sys.exit(1)
+
+proceed = force
+if not proceed:
+    conf = input(f\"Are you sure you want to remove '{match['label']}' ({match['username']})? [y/N]: \")
+    proceed = (conf.strip().lower() == 'y')
+
+if proceed:
     data = [a for a in data if a != match]
     for idx, a in enumerate(data, 1): a['index'] = idx
     with open(cfg, 'w') as f: json.dump(data, f, indent=2)
-    print(f\"[OK] Removed '{match['label']}'.\")
+    print(f\"\n[OK] Account '{match['label']}' ({match['username']}) removed successfully.\")
 else:
     print('Cancelled.')
-" "$target"
+" "$target" "$force"
     show_list
+}
+
+show_help() {
+    echo ""
+    echo "============================================================"
+    echo -e " \033[0;36mgit-account-switcher (gswitch) ⚡\033[0m"
+    echo -e " \033[0;34mFast Multi-Account GitHub & Git Identity Switcher\033[0m"
+    echo "============================================================"
+    echo ""
+    echo -e "\033[1;33mUSAGE:\033[0m"
+    echo "  gswitch [account]                   Switch account globally (by key, username, or index)"
+    echo "  gswitch -l [account]                Switch account locally (current repository only)"
+    echo "  gswitch                             Open interactive account selection menu"
+    echo "  gswitch status | who                View active GitHub token & Git identities"
+    echo "  gswitch list | ls                   List all configured account profiles"
+    echo "  gswitch sync                        Auto-discover & sync accounts from GitHub CLI"
+    echo "  gswitch setup                       Launch interactive first-time setup wizard"
+    echo "  gswitch add [user] [key] [name] [email]  Add or update an account profile"
+    echo "  gswitch remove [key] [-f]           Remove an account profile and re-index list"
+    echo "  gswitch help                        Display this help message"
+    echo ""
+    echo -e "\033[1;33mCOMMANDS:\033[0m"
+    echo "  add      Add a new profile interactively or via args: gswitch add <user> <key> [name] [email]"
+    echo "  remove   Remove a profile by key, user, or index: gswitch remove <key> [-f]"
+    echo "  sync     Scan 'gh auth status', fetch IDs, and configure private noreply emails"
+    echo "  setup    Launch the first-time guided setup wizard"
+    echo "  status   Display active GitHub CLI user and global/local Git user.name & email"
+    echo "  list     Display formatted table of all configured profiles with * ACTIVE badge"
+    echo ""
+    echo -e "\033[1;33mFLAGS:\033[0m"
+    echo "  -l, --local                         Scope changes to current repository only (.git/config)"
+    echo "  -g, --global                        Scope changes system-wide (default)"
+    echo "  -f, --force                         Force action without interactive confirmation"
+    echo "  -h, --help                          Show detailed help information"
+    echo ""
+    echo -e "\033[1;33mEXAMPLES:\033[0m"
+    echo "  gswitch personal                    # Switch to 'personal' profile globally"
+    echo "  gswitch work                        # Switch to 'work' profile globally"
+    echo "  gswitch 1                           # Switch to profile #1"
+    echo "  gswitch -l work                     # Apply 'work' author to THIS repository only"
+    echo "  gswitch sync                        # Auto-import all accounts from 'gh auth status'"
+    echo "  gswitch add                         # Add a new account interactively"
+    echo "  gswitch add octocat work            # Add 'octocat' with key 'work' non-interactively"
+    echo "  gswitch remove work                 # Remove the 'work' account profile"
+    echo "  gswitch remove 2 -f                 # Force remove account #2 without confirmation"
+    echo "  git who                             # Fast alias to inspect current identity"
+    echo ""
+    echo -e "\033[1;33mCONFIG PATH:\033[0m"
+    echo -e "  \033[0;36m$CONFIG_FILE\033[0m"
+    echo ""
 }
 
 setup_wizard() {
@@ -339,17 +449,26 @@ while [[ $# -gt 0 ]]; do
             exit 0
             ;;
         add)
-            add_account
+            shift
+            add_account "$@"
             exit 0
             ;;
         remove|rm|delete)
             shift
-            remove_account "$1"
+            FORCE="false"
+            TARGET=""
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -f|--force|-y|--yes) FORCE="true" ;;
+                    *) TARGET="$1" ;;
+                esac
+                shift
+            done
+            remove_account "$TARGET" "$FORCE"
             exit 0
             ;;
         help|-h|--help)
-            echo "git-account-switcher (gswitch) ⚡"
-            echo "Usage: gswitch [account] [-l|--local] | status | list | sync | setup | add | remove"
+            show_help
             exit 0
             ;;
         *)

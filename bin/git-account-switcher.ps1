@@ -15,11 +15,26 @@ param(
     [Parameter(Position = 1)]
     [string]$Argument,
 
+    [Parameter(Position = 2)]
+    [string]$Extra1,
+
+    [Parameter(Position = 3)]
+    [string]$Extra2,
+
+    [Parameter(Position = 4)]
+    [string]$Extra3,
+
+    [Parameter(Position = 5)]
+    [string]$Extra4,
+
     [switch]$Local,
     [switch]$Global,
+    [switch]$Force,
     [Alias("h")]
     [switch]$Help
 )
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 $ConfigFile = "$HOME\.config\git-account-switcher\accounts.json"
 $ConfigDir  = "$HOME\.config\git-account-switcher"
@@ -28,7 +43,7 @@ function Get-Accounts {
     $list = @()
     if (Test-Path $ConfigFile) {
         try {
-            $json = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
+            $json = Get-Content -Path $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
             $idx = 1
             foreach ($item in $json) {
                 $list += @{
@@ -119,7 +134,7 @@ function Show-List {
     if ($accounts.Count -eq 0) {
         Write-Host ""
         Write-Host "[INFO] No account profiles configured yet." -ForegroundColor Yellow
-        Write-Host "       Run 'gswitch setup' or 'gswitch sync' to add your accounts." -ForegroundColor Gray
+        Write-Host "       Run 'gswitch setup', 'gswitch add', or 'gswitch sync' to add accounts." -ForegroundColor Gray
         Write-Host ""
         return
     }
@@ -184,10 +199,14 @@ function Switch-Account($acc, [bool]$isLocalSwitch) {
     Write-Host ""
 }
 
-function Add-AccountInteractive {
+function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string]$passedName, [string]$passedEmail, [string]$passedLabel) {
     Write-Host ""
     Write-Host "=== Add New GitHub Account Profile ===" -ForegroundColor Cyan
-    $user = Read-Host "Enter GitHub Username (e.g. johndoe)"
+    
+    $user = $passedUser
+    if (-not $user) {
+        $user = Read-Host "Enter GitHub Username (e.g. octocat)"
+    }
     if (-not $user) {
         Write-Host "Cancelled: username cannot be empty." -ForegroundColor Gray
         return
@@ -197,26 +216,55 @@ function Add-AccountInteractive {
     $userId = "0"
     $defaultName = $user
     try {
-        # Try switching or fetching info
         $info = gh api "users/$user" --jq "{id: .id, login: .login, name: .name}" 2>$null | ConvertFrom-Json
         if ($info.id) { $userId = $info.id }
         if ($info.name) { $defaultName = $info.name }
     } catch {}
 
-    $key = Read-Host "Enter role/key for quick switching (e.g. work, personal, school) [default: $($user.ToLower())]"
+    $key = $passedKey
+    if (-not $key) {
+        $key = Read-Host "Enter role/key for quick switching (e.g. work, personal, school) [default: $($user.ToLower())]"
+    }
     if (-not $key) { $key = $user.ToLower() }
 
-    $label = Read-Host "Enter display label [default: $user]"
+    $label = $passedLabel
+    if (-not $label) {
+        if ($passedUser -and $passedKey) {
+            $label = (Get-Culture).TextInfo.ToTitleCase($key)
+        } else {
+            $label = Read-Host "Enter display label [default: $user]"
+        }
+    }
     if (-not $label) { $label = $user }
 
-    $commitName = Read-Host "Enter Git commit author name [default: $defaultName]"
+    $commitName = $passedName
+    if (-not $commitName) {
+        if ($passedUser -and $passedKey) {
+            $commitName = $defaultName
+        } else {
+            $commitName = Read-Host "Enter Git commit author name [default: $defaultName]"
+        }
+    }
     if (-not $commitName) { $commitName = $defaultName }
 
     $defaultEmail = if ($userId -ne "0") { "$userId+$user@users.noreply.github.com" } else { "$user@users.noreply.github.com" }
-    $commitEmail = Read-Host "Enter Git commit email [default: $defaultEmail]"
+    $commitEmail = $passedEmail
+    if (-not $commitEmail) {
+        if ($passedUser -and $passedKey) {
+            $commitEmail = $defaultEmail
+        } else {
+            $commitEmail = Read-Host "Enter Git commit email [default: $defaultEmail]"
+        }
+    }
     if (-not $commitEmail) { $commitEmail = $defaultEmail }
 
     $accounts = Get-Accounts
+    $existingMatch = $accounts | Where-Object { $_.Key.ToLower() -eq $key.ToLower() -or $_.Username.ToLower() -eq $user.ToLower() }
+    if ($existingMatch) {
+        Write-Host "[INFO] Updating existing profile for '$($existingMatch.Label)' ($($existingMatch.Username))..." -ForegroundColor Yellow
+        $accounts = @($accounts | Where-Object { $_.Key.ToLower() -ne $key.ToLower() -and $_.Username.ToLower() -ne $user.ToLower() })
+    }
+
     $newIdx = $accounts.Count + 1
     $accounts += @{
         Index       = $newIdx
@@ -231,13 +279,14 @@ function Add-AccountInteractive {
 
     Save-Accounts $accounts
     Write-Host ""
-    Write-Host "[OK] Account '$label' ($user) successfully added!" -ForegroundColor Green
+    Write-Host "[OK] Account '$label' ($user) successfully configured!" -ForegroundColor Green
     Show-List
 }
 
-function Remove-Account($target) {
+function Remove-Account([string]$target, [bool]$forceDelete) {
     if (-not $target) {
-        $target = Read-Host "Enter account number, key, or username to remove"
+        Show-List
+        $target = Read-Host "Enter account number, key, or username to remove (or Enter to cancel)"
     }
     if (-not $target) {
         Write-Host "Cancelled." -ForegroundColor Gray
@@ -256,15 +305,21 @@ function Remove-Account($target) {
     }
 
     if (-not $match) {
-        Write-Host "[ERROR] Account '$target' not found." -ForegroundColor Red
+        Write-Host "[ERROR] Account '$target' not found. Run 'gswitch list' to view available accounts." -ForegroundColor Red
         return
     }
 
-    $confirm = Read-Host "Are you sure you want to remove '$($match.Label)' ($($match.Username))? [y/N]"
-    if ($confirm -match '^[yY]$') {
-        $remaining = @($accounts | Where-Object { $_.Username -ne $match.Username -or $_.Key -ne $match.Key })
+    $proceed = $forceDelete
+    if (-not $proceed) {
+        $confirm = Read-Host "Are you sure you want to remove '$($match.Label)' ($($match.Username))? [y/N]"
+        $proceed = ($confirm -match '^[yY]$')
+    }
+
+    if ($proceed) {
+        $remaining = @($accounts | Where-Object { $_.Username.ToLower() -ne $match.Username.ToLower() -or $_.Key.ToLower() -ne $match.Key.ToLower() })
         Save-Accounts $remaining
-        Write-Host "[OK] Account '$($match.Label)' removed." -ForegroundColor Green
+        Write-Host ""
+        Write-Host "[OK] Account '$($match.Label)' ($($match.Username)) removed successfully." -ForegroundColor Green
         Show-List
     } else {
         Write-Host "Cancelled." -ForegroundColor Gray
@@ -374,35 +429,59 @@ function Sync-FromGitHubCli {
 }
 
 function Show-HelpMessage {
-    Write-Host @"
-git-account-switcher (gswitch) ⚡
-Fast Multi-Account GitHub & Git Identity Switcher
-
-USAGE:
-  gswitch [account]           Switch to account globally (by keyword, username, or index)
-  gswitch -l [account]        Switch to account locally (current repository only)
-  gswitch                     Interactive selection menu
-  gswitch status | who        Show current active GitHub token & Git identities
-  gswitch list | ls           List all configured accounts
-  gswitch sync                Auto-discover & sync logged-in GitHub CLI accounts
-  gswitch setup               Launch first-time interactive setup wizard
-  gswitch add                 Interactively add a new account profile
-  gswitch remove [key]        Remove an account profile
-
-EXAMPLES:
-  gswitch main
-  gswitch work
-  gswitch 1
-  gswitch -l work             # Applies user.name/email to this repo only
-  gswitch sync                # Auto-imports all accounts from 'gh auth status'
-  gswitch add                 # Add an account profile
-"@
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host " git-account-switcher (gswitch) ⚡" -ForegroundColor Cyan
+    Write-Host " Fast Multi-Account GitHub & Git Identity Switcher" -ForegroundColor DarkCyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "USAGE:" -ForegroundColor Yellow
+    Write-Host "  gswitch [account]                   Switch account globally (by key, username, or index)" -ForegroundColor White
+    Write-Host "  gswitch -l [account]                Switch account locally (current repository only)" -ForegroundColor White
+    Write-Host "  gswitch                             Open interactive account selection menu" -ForegroundColor White
+    Write-Host "  gswitch status | who                View active GitHub token & Git identities" -ForegroundColor White
+    Write-Host "  gswitch list | ls                   List all configured account profiles" -ForegroundColor White
+    Write-Host "  gswitch sync                        Auto-discover & sync accounts from GitHub CLI" -ForegroundColor White
+    Write-Host "  gswitch setup                       Launch interactive first-time setup wizard" -ForegroundColor White
+    Write-Host "  gswitch add [user] [key] [name] [email]  Add or update an account profile" -ForegroundColor White
+    Write-Host "  gswitch remove [key] [-f]           Remove an account profile and re-index list" -ForegroundColor White
+    Write-Host "  gswitch help                        Display this help message" -ForegroundColor White
+    Write-Host ""
+    Write-Host "COMMANDS:" -ForegroundColor Yellow
+    Write-Host "  add      Add a new profile interactively or via args: gswitch add <user> <key> [name] [email]" -ForegroundColor White
+    Write-Host "  remove   Remove a profile by key, user, or index: gswitch remove <key> [-f]" -ForegroundColor White
+    Write-Host "  sync     Scan 'gh auth status', fetch IDs, and configure private noreply emails" -ForegroundColor White
+    Write-Host "  setup    Launch the first-time guided setup wizard" -ForegroundColor White
+    Write-Host "  status   Display active GitHub CLI user and global/local Git user.name & email" -ForegroundColor White
+    Write-Host "  list     Display formatted table of all configured profiles with * ACTIVE badge" -ForegroundColor White
+    Write-Host ""
+    Write-Host "FLAGS:" -ForegroundColor Yellow
+    Write-Host "  -l, --local                         Scope changes to current repository only (.git/config)" -ForegroundColor White
+    Write-Host "  -g, --global                        Scope changes system-wide (default)" -ForegroundColor White
+    Write-Host "  -f, --force                         Force action without interactive confirmation" -ForegroundColor White
+    Write-Host "  -h, --help                          Show detailed help information" -ForegroundColor White
+    Write-Host ""
+    Write-Host "EXAMPLES:" -ForegroundColor Yellow
+    Write-Host "  gswitch personal                    # Switch to 'personal' profile globally" -ForegroundColor Gray
+    Write-Host "  gswitch work                        # Switch to 'work' profile globally" -ForegroundColor Gray
+    Write-Host "  gswitch 1                           # Switch to profile #1" -ForegroundColor Gray
+    Write-Host "  gswitch -l work                     # Apply 'work' author to THIS repository only" -ForegroundColor Gray
+    Write-Host "  gswitch sync                        # Auto-import all accounts from 'gh auth status'" -ForegroundColor Gray
+    Write-Host "  gswitch add                         # Add a new account interactively" -ForegroundColor Gray
+    Write-Host "  gswitch add octocat work            # Add 'octocat' with key 'work' non-interactively" -ForegroundColor Gray
+    Write-Host "  gswitch remove work                 # Remove the 'work' account profile" -ForegroundColor Gray
+    Write-Host "  gswitch remove 2 -f                 # Force remove account #2 without confirmation" -ForegroundColor Gray
+    Write-Host "  git who                             # Fast alias to inspect current identity" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "CONFIG PATH:" -ForegroundColor Yellow
+    Write-Host "  $ConfigFile" -ForegroundColor DarkCyan
+    Write-Host ""
 }
 
 # -------------------------------------------------------------
 # Dispatcher
 # -------------------------------------------------------------
-if ($Help -or $Command -in @("help", "-h", "--help")) {
+if ($Help -or $Command -in @("help", "-h", "--help", "-?", "/?")) {
     Show-HelpMessage
     exit 0
 }
@@ -428,12 +507,14 @@ if ($Command -in @("setup", "init")) {
 }
 
 if ($Command -eq "add") {
-    Add-AccountInteractive
+    Add-AccountInteractive $Argument $Extra1 $Extra2 $Extra3 $Extra4
     exit 0
 }
 
 if ($Command -in @("remove", "rm", "delete")) {
-    Remove-Account $Argument
+    $isForce = $Force.IsPresent -or ($Extra1 -in @("-f", "--force", "-y", "--yes")) -or ($Argument -in @("-f", "--force"))
+    $target = if ($Argument -in @("-f", "--force")) { $Extra1 } else { $Argument }
+    Remove-Account $target $isForce
     exit 0
 }
 
