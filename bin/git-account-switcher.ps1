@@ -3,8 +3,8 @@
     git-account-switcher (gswitch) - Fast Multi-Account GitHub & Git Identity Switcher
 .DESCRIPTION
     Switches active GitHub CLI token, Git user.name, and Git user.email in one command.
-    Supports global and repository-local switching, auto-syncing from GitHub CLI,
-    and profile management.
+    Supports global and repository-local switching, first-time setup wizard,
+    auto-syncing from GitHub CLI, and dynamic account management.
 #>
 
 [CmdletBinding()]
@@ -29,9 +29,10 @@ function Get-Accounts {
     if (Test-Path $ConfigFile) {
         try {
             $json = Get-Content -Path $ConfigFile -Raw | ConvertFrom-Json
+            $idx = 1
             foreach ($item in $json) {
                 $list += @{
-                    Index       = [int]$item.index
+                    Index       = $idx
                     Key         = [string]$item.key
                     AliasList   = [string[]]$item.aliases
                     Label       = [string]$item.label
@@ -40,6 +41,7 @@ function Get-Accounts {
                     Email       = [string]$item.email
                     Description = [string]$item.description
                 }
+                $idx++
             }
         } catch {
             Write-Host "[WARNING] Could not parse $ConfigFile : $_" -ForegroundColor Yellow
@@ -114,6 +116,14 @@ function Show-List {
     $accounts = Get-Accounts
     $activeGh = Get-ActiveGhUser
     
+    if ($accounts.Count -eq 0) {
+        Write-Host ""
+        Write-Host "[INFO] No account profiles configured yet." -ForegroundColor Yellow
+        Write-Host "       Run 'gswitch setup' or 'gswitch sync' to add your accounts." -ForegroundColor Gray
+        Write-Host ""
+        return
+    }
+
     Write-Host ""
     Write-Host "Configured Account Profiles ($($accounts.Count)):" -ForegroundColor Yellow
     Write-Host "================================================================================" -ForegroundColor DarkGray
@@ -172,6 +182,131 @@ function Switch-Account($acc, [bool]$isLocalSwitch) {
         Write-Host "=> Ready to commit & push as $($acc.Label)!" -ForegroundColor Cyan
     }
     Write-Host ""
+}
+
+function Add-AccountInteractive {
+    Write-Host ""
+    Write-Host "=== Add New GitHub Account Profile ===" -ForegroundColor Cyan
+    $user = Read-Host "Enter GitHub Username (e.g. johndoe)"
+    if (-not $user) {
+        Write-Host "Cancelled: username cannot be empty." -ForegroundColor Gray
+        return
+    }
+
+    Write-Host "Querying GitHub user details for '$user'..." -ForegroundColor DarkGray
+    $userId = "0"
+    $defaultName = $user
+    try {
+        # Try switching or fetching info
+        $info = gh api "users/$user" --jq "{id: .id, login: .login, name: .name}" 2>$null | ConvertFrom-Json
+        if ($info.id) { $userId = $info.id }
+        if ($info.name) { $defaultName = $info.name }
+    } catch {}
+
+    $key = Read-Host "Enter role/key for quick switching (e.g. work, personal, school) [default: $($user.ToLower())]"
+    if (-not $key) { $key = $user.ToLower() }
+
+    $label = Read-Host "Enter display label [default: $user]"
+    if (-not $label) { $label = $user }
+
+    $commitName = Read-Host "Enter Git commit author name [default: $defaultName]"
+    if (-not $commitName) { $commitName = $defaultName }
+
+    $defaultEmail = if ($userId -ne "0") { "$userId+$user@users.noreply.github.com" } else { "$user@users.noreply.github.com" }
+    $commitEmail = Read-Host "Enter Git commit email [default: $defaultEmail]"
+    if (-not $commitEmail) { $commitEmail = $defaultEmail }
+
+    $accounts = Get-Accounts
+    $newIdx = $accounts.Count + 1
+    $accounts += @{
+        Index       = $newIdx
+        Key         = $key.ToLower()
+        AliasList   = @("$newIdx", $key.ToLower(), $user.ToLower())
+        Label       = $label
+        Username    = $user
+        Name        = $commitName
+        Email       = $commitEmail
+        Description = "$label account ($user)"
+    }
+
+    Save-Accounts $accounts
+    Write-Host ""
+    Write-Host "[OK] Account '$label' ($user) successfully added!" -ForegroundColor Green
+    Show-List
+}
+
+function Remove-Account($target) {
+    if (-not $target) {
+        $target = Read-Host "Enter account number, key, or username to remove"
+    }
+    if (-not $target) {
+        Write-Host "Cancelled." -ForegroundColor Gray
+        return
+    }
+
+    $accounts = Get-Accounts
+    $clean = $target.Trim().ToLower()
+    $match = $null
+
+    foreach ($a in $accounts) {
+        if ($a.Index.ToString() -eq $clean -or $a.Key.ToLower() -eq $clean -or $a.Username.ToLower() -eq $clean) {
+            $match = $a
+            break
+        }
+    }
+
+    if (-not $match) {
+        Write-Host "[ERROR] Account '$target' not found." -ForegroundColor Red
+        return
+    }
+
+    $confirm = Read-Host "Are you sure you want to remove '$($match.Label)' ($($match.Username))? [y/N]"
+    if ($confirm -match '^[yY]$') {
+        $remaining = @($accounts | Where-Object { $_.Username -ne $match.Username -or $_.Key -ne $match.Key })
+        Save-Accounts $remaining
+        Write-Host "[OK] Account '$($match.Label)' removed." -ForegroundColor Green
+        Show-List
+    } else {
+        Write-Host "Cancelled." -ForegroundColor Gray
+    }
+}
+
+function Setup-Wizard {
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host " git-account-switcher First-Time Setup Wizard" -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "This wizard will help you configure your GitHub accounts." -ForegroundColor White
+    Write-Host ""
+
+    # Check if gh CLI has accounts
+    $statusLines = gh auth status 2>&1
+    $detected = @()
+    foreach ($line in $statusLines) {
+        if ($line -match 'Logged in to .* account ([a-zA-Z0-9_-]+)') {
+            $detected += $matches[1]
+        }
+    }
+
+    if ($detected.Count -gt 0) {
+        Write-Host "Found $($detected.Count) account(s) in GitHub CLI: $($detected -join ', ')" -ForegroundColor Green
+        $auto = Read-Host "Would you like to auto-import them now? [Y/n]"
+        if (-not $auto -or $auto -match '^[yY]$') {
+            Sync-FromGitHubCli
+            return
+        }
+    }
+
+    Write-Host "Let's add your accounts one by one." -ForegroundColor Yellow
+    $adding = $true
+    while ($adding) {
+        Add-AccountInteractive
+        $more = Read-Host "Do you want to add another account? [y/N]"
+        if ($more -notmatch '^[yY]$') {
+            $adding = $false
+        }
+    }
 }
 
 function Sync-FromGitHubCli {
@@ -244,12 +379,15 @@ git-account-switcher (gswitch) ⚡
 Fast Multi-Account GitHub & Git Identity Switcher
 
 USAGE:
-  gswitch [account]           Switch to account globally (by keyword or index)
+  gswitch [account]           Switch to account globally (by keyword, username, or index)
   gswitch -l [account]        Switch to account locally (current repository only)
   gswitch                     Interactive selection menu
   gswitch status | who        Show current active GitHub token & Git identities
   gswitch list | ls           List all configured accounts
   gswitch sync                Auto-discover & sync logged-in GitHub CLI accounts
+  gswitch setup               Launch first-time interactive setup wizard
+  gswitch add                 Interactively add a new account profile
+  gswitch remove [key]        Remove an account profile
 
 EXAMPLES:
   gswitch main
@@ -257,6 +395,7 @@ EXAMPLES:
   gswitch 1
   gswitch -l work             # Applies user.name/email to this repo only
   gswitch sync                # Auto-imports all accounts from 'gh auth status'
+  gswitch add                 # Add an account profile
 "@
 }
 
@@ -283,6 +422,21 @@ if ($Command -in @("sync", "import")) {
     exit 0
 }
 
+if ($Command -in @("setup", "init")) {
+    Setup-Wizard
+    exit 0
+}
+
+if ($Command -eq "add") {
+    Add-AccountInteractive
+    exit 0
+}
+
+if ($Command -in @("remove", "rm", "delete")) {
+    Remove-Account $Argument
+    exit 0
+}
+
 # Handle local flag passed before command: gswitch -l <target>
 $targetArg = $Command
 $applyLocal = $Local.IsPresent
@@ -293,6 +447,18 @@ if ($Command -in @("-l", "--local")) {
 }
 
 $accounts = Get-Accounts
+
+# If no accounts exist at all, offer setup wizard
+if ($accounts.Count -eq 0) {
+    Write-Host "[INFO] No account profiles found." -ForegroundColor Yellow
+    $runWizard = Read-Host "Would you like to run the first-time setup wizard now? [Y/n]"
+    if (-not $runWizard -or $runWizard -match '^[yY]$') {
+        Setup-Wizard
+        exit 0
+    } else {
+        exit 0
+    }
+}
 
 # If no target argument provided, display interactive selector
 if (-not $targetArg) {
@@ -305,9 +471,13 @@ if (-not $targetArg) {
         Write-Host "(key: $($a.Key))" -ForegroundColor DarkCyan
     }
     Write-Host ""
-    $choice = Read-Host "Select account [1-$($accounts.Count)], 's' to sync, or Enter to cancel"
+    $choice = Read-Host "Select account [1-$($accounts.Count)], 's' to sync, 'a' to add, or Enter to cancel"
     if ($choice -match '^[sS]$') {
         Sync-FromGitHubCli
+        exit 0
+    }
+    if ($choice -match '^[aA]$') {
+        Add-AccountInteractive
         exit 0
     }
     if ($choice) {

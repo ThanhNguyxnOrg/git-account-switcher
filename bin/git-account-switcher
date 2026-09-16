@@ -60,20 +60,25 @@ show_list() {
         python3 -c "
 import json, sys
 active = sys.argv[1].lower()
-with open('$CONFIG_FILE') as f:
-    accounts = json.load(f)
-for a in accounts:
-    is_act = (a.get('username', '').lower() == active)
-    marker = '> ' if is_act else '  '
-    status = '* ACTIVE' if is_act else f\"(key: {a.get('key','')})\"
-    color = '\033[0;32m' if is_act else ''
-    reset = '\033[0m' if is_act else ''
-    print(f\"{color}{marker}[{a.get('index')}] {a.get('label',''):<18} {a.get('username',''):<18} {a.get('email',''):<40} {status}{reset}\")
+try:
+    with open('$CONFIG_FILE') as f:
+        accounts = json.load(f)
+    if not accounts:
+        print('[INFO] No accounts configured yet. Run \"gswitch setup\" to add accounts.')
+    for a in accounts:
+        is_act = (a.get('username', '').lower() == active)
+        marker = '> ' if is_act else '  '
+        status = '* ACTIVE' if is_act else f\"(key: {a.get('key','')})\"
+        color = '\033[0;32m' if is_act else ''
+        reset = '\033[0m' if is_act else ''
+        print(f\"{color}{marker}[{a.get('index')}] {a.get('label',''):<18} {a.get('username',''):<18} {a.get('email',''):<40} {status}{reset}\")
+except Exception:
+    print('[INFO] No accounts configured yet.')
 " "$active_gh"
     elif [[ -f "$CONFIG_FILE" ]] && command -v jq >/dev/null 2>&1; then
         jq -r '.[] | "   [\(.index)] \(.label) (\(.username)) - \(.email)"' "$CONFIG_FILE"
     else
-        echo "No accounts configuration found at $CONFIG_FILE."
+        echo "No accounts configuration found at $CONFIG_FILE. Run 'gswitch setup'."
     fi
     echo "================================================================================"
     echo ""
@@ -102,10 +107,17 @@ sync_from_gh() {
 import json, sys, subprocess
 
 accounts = sys.argv[1:]
+orig_user = ''
+try:
+    orig_user = subprocess.check_output(['gh', 'api', 'user', '--jq', '.login'], stderr=subprocess.DEVNULL).decode().strip()
+except Exception:
+    pass
+
 result = []
 for idx, user in enumerate(accounts, 1):
     try:
-        out = subprocess.check_output(['gh', 'api', f'users/{user}'], stderr=subprocess.DEVNULL)
+        subprocess.call(['gh', 'auth', 'switch', '-u', user], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        out = subprocess.check_output(['gh', 'api', 'user'], stderr=subprocess.DEVNULL)
         info = json.loads(out)
         uid = info.get('id', 0)
         uname = info.get('name') or user
@@ -124,11 +136,137 @@ for idx, user in enumerate(accounts, 1):
         'description': f'GitHub account {user}'
     })
 
+if orig_user:
+    subprocess.call(['gh', 'auth', 'switch', '-u', orig_user], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(result, f, indent=2)
 print(f'[OK] Successfully synced {len(result)} accounts to $CONFIG_FILE!')
 " "${accounts[@]}"
     show_list
+}
+
+add_account() {
+    echo ""
+    echo "=== Add New GitHub Account Profile ==="
+    read -r -p "Enter GitHub Username: " USERNAME
+    if [[ -z "$USERNAME" ]]; then
+        echo "Cancelled."
+        return
+    fi
+
+    read -r -p "Enter role/key (e.g. work, personal, school) [default: ${USERNAME,,}]: " KEY
+    KEY=${KEY:-${USERNAME,,}}
+
+    read -r -p "Enter display label [default: $USERNAME]: " LABEL
+    LABEL=${LABEL:-$USERNAME}
+
+    local uid="0"
+    local uname="$USERNAME"
+    if command -v gh >/dev/null 2>&1; then
+        out=$(gh api "users/$USERNAME" 2>/dev/null || true)
+        if [[ -n "$out" ]]; then
+            uid=$(python3 -c "import json, sys; print(json.loads(sys.argv[1]).get('id', 0))" "$out" 2>/dev/null || echo "0")
+            uname=$(python3 -c "import json, sys; print(json.loads(sys.argv[1]).get('name') or sys.argv[2])" "$out" "$USERNAME" 2>/dev/null || echo "$USERNAME")
+        fi
+    fi
+
+    read -r -p "Enter commit author name [default: $uname]: " COMMIT_NAME
+    COMMIT_NAME=${COMMIT_NAME:-$uname}
+
+    local def_email
+    if [[ "$uid" != "0" ]]; then
+        def_email="${uid}+${USERNAME}@users.noreply.github.com"
+    else
+        def_email="${USERNAME}@users.noreply.github.com"
+    fi
+
+    read -r -p "Enter commit email [default: $def_email]: " COMMIT_EMAIL
+    COMMIT_EMAIL=${COMMIT_EMAIL:-$def_email}
+
+    mkdir -p "$CONFIG_DIR"
+    python3 -c "
+import json, os
+cfg = '$CONFIG_FILE'
+data = []
+if os.path.exists(cfg):
+    try:
+        with open(cfg) as f: data = json.load(f)
+    except: pass
+
+idx = len(data) + 1
+data.append({
+    'index': idx,
+    'key': '$KEY',
+    'aliases': [str(idx), '$KEY', '${USERNAME,,}'],
+    'label': '$LABEL',
+    'username': '$USERNAME',
+    'name': '$COMMIT_NAME',
+    'email': '$COMMIT_EMAIL',
+    'description': '$LABEL account ($USERNAME)'
+})
+with open(cfg, 'w') as f: json.dump(data, f, indent=2)
+print('[OK] Added account successfully!')
+"
+    show_list
+}
+
+remove_account() {
+    local target="$1"
+    if [[ -z "$target" ]]; then
+        read -r -p "Enter account number, key, or username to remove: " target
+    fi
+    if [[ -z "$target" ]]; then
+        echo "Cancelled."
+        return
+    fi
+
+    python3 -c "
+import json, sys
+cfg = '$CONFIG_FILE'
+with open(cfg) as f: data = json.load(f)
+q = sys.argv[1].lower()
+match = None
+for a in data:
+    if str(a.get('index')) == q or a.get('key','').lower() == q or a.get('username','').lower() == q:
+        match = a
+        break
+if not match:
+    print(f'[ERROR] Account \"{q}\" not found.')
+    sys.exit(1)
+
+conf = input(f\"Are you sure you want to remove '{match['label']}' ({match['username']})? [y/N]: \")
+if conf.lower() == 'y':
+    data = [a for a in data if a != match]
+    for idx, a in enumerate(data, 1): a['index'] = idx
+    with open(cfg, 'w') as f: json.dump(data, f, indent=2)
+    print(f\"[OK] Removed '{match['label']}'.\")
+else:
+    print('Cancelled.')
+" "$target"
+    show_list
+}
+
+setup_wizard() {
+    echo ""
+    echo "============================================================"
+    echo " git-account-switcher Setup Wizard"
+    echo "============================================================"
+    if gh auth status 2>&1 | grep -q 'Logged in to .* account'; then
+        read -r -p "Found logged-in accounts in GitHub CLI. Auto-import them now? [Y/n]: " AUTO
+        if [[ -z "$AUTO" || "$AUTO" =~ ^[yY]$ ]]; then
+            sync_from_gh
+            return
+        fi
+    fi
+
+    while true; do
+        add_account
+        read -r -p "Add another account? [y/N]: " MORE
+        if [[ "$MORE" != [yY]* ]]; then
+            break
+        fi
+    done
 }
 
 switch_account() {
@@ -196,9 +334,22 @@ while [[ $# -gt 0 ]]; do
             sync_from_gh
             exit 0
             ;;
+        setup|init)
+            setup_wizard
+            exit 0
+            ;;
+        add)
+            add_account
+            exit 0
+            ;;
+        remove|rm|delete)
+            shift
+            remove_account "$1"
+            exit 0
+            ;;
         help|-h|--help)
             echo "git-account-switcher (gswitch) ⚡"
-            echo "Usage: gswitch [account] [-l|--local] | status | list | sync"
+            echo "Usage: gswitch [account] [-l|--local] | status | list | sync | setup | add | remove"
             exit 0
             ;;
         *)
@@ -208,12 +359,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# If no config exists, prompt setup
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    read -r -p "No accounts configured yet. Run setup wizard now? [Y/n]: " RUN_WIZ
+    if [[ -z "$RUN_WIZ" || "$RUN_WIZ" =~ ^[yY]$ ]]; then
+        setup_wizard
+        exit 0
+    else
+        exit 0
+    fi
+fi
+
 if [[ -z "$TARGET" ]]; then
     show_status
     show_list
-    read -r -p "Select account, 's' to sync, or Enter to cancel: " CHOICE
+    read -r -p "Select account, 's' to sync, 'a' to add, or Enter to cancel: " CHOICE
     if [[ "$CHOICE" =~ ^[sS]$ ]]; then
         sync_from_gh
+        exit 0
+    elif [[ "$CHOICE" =~ ^[aA]$ ]]; then
+        add_account
         exit 0
     elif [[ -n "$CHOICE" ]]; then
         TARGET="$CHOICE"
@@ -223,23 +388,33 @@ if [[ -z "$TARGET" ]]; then
     fi
 fi
 
-# Find account in JSON
+# Find account in JSON with exact and fuzzy matching
 SELECTED=$(python3 -c "
 import json, sys
 q = sys.argv[1].lower()
 with open('$CONFIG_FILE') as f:
     data = json.load(f)
+
+# 1. Exact match
 for a in data:
     aliases = [str(x).lower() for x in a.get('aliases', [])]
     if str(a.get('index')) == q or a.get('key','').lower() == q or a.get('username','').lower() == q or q in aliases:
         print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\")
-        break
+        sys.exit(0)
+
+# 2. Fuzzy match
+for a in data:
+    u = a.get('username','').lower()
+    k = a.get('key','').lower()
+    if q in u or u in q or q in k or k in q:
+        print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\")
+        sys.exit(0)
 " "$TARGET" 2>/dev/null || true)
 
 if [[ -n "$SELECTED" ]]; then
     IFS=$'\t' read -r S_LABEL S_USER S_NAME S_EMAIL <<< "$SELECTED"
     switch_account "$S_LABEL" "$S_USER" "$S_NAME" "$S_EMAIL" "$APPLY_LOCAL"
 else
-    echo -e "\033[0;31m[ERROR] Account '$TARGET' not found. Run 'gswitch list' or 'gswitch sync'.\033[0m"
+    echo -e "\033[0;31m[ERROR] Account '$TARGET' not found. Run 'gswitch list', 'gswitch add', or 'gswitch sync'.\033[0m"
     exit 1
 fi
