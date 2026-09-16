@@ -75,6 +75,16 @@ test_update_existing() {
     [[ "$count" -eq 2 ]] && grep -q "Mona Updated" "$SANDBOX_CONFIG"
 }
 
+test_add_alias() {
+    "$SWITCHER" alias work w >/dev/null 2>&1
+    grep -q '"w"' "$SANDBOX_CONFIG"
+}
+
+test_remove_alias() {
+    "$SWITCHER" unalias work w >/dev/null 2>&1
+    ! grep -q '"w"' "$SANDBOX_CONFIG"
+}
+
 test_remove_profile() {
     "$SWITCHER" remove school -f >/dev/null 2>&1
     local count
@@ -88,6 +98,8 @@ assert_test "Empty config list handling" test_empty_list
 assert_test "Add profile non-interactively ('add octocat work')" test_add_first
 assert_test "Add second profile ('add student-mona school')" test_add_second
 assert_test "Update existing profile without duplicates" test_update_existing
+assert_test "Add shortcut alias ('alias work w')" test_add_alias
+assert_test "Remove shortcut alias ('unalias work w')" test_remove_alias
 assert_test "Remove profile ('remove school -f')" test_remove_profile
 
 echo ""

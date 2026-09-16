@@ -155,18 +155,21 @@ function Show-List {
     Write-Host "================================================================================" -ForegroundColor DarkGray
     foreach ($a in $accounts) {
         $isActive = ($a.Username.ToLower() -eq $activeGh.ToLower())
+        $aliasStr = if ($a.AliasList) { ($a.AliasList -join ', ') } else { "$($a.Index), $($a.Key)" }
         if ($isActive) {
             Write-Host " > [$($a.Index)] " -NoNewline -ForegroundColor Green
-            Write-Host "$($a.Label.PadRight(18)) " -NoNewline -ForegroundColor Green
-            Write-Host "$($a.Username.PadRight(18)) " -NoNewline -ForegroundColor Green
-            Write-Host "$($a.Email.PadRight(42)) " -NoNewline -ForegroundColor Green
+            Write-Host "$($a.Label.PadRight(16)) " -NoNewline -ForegroundColor Green
+            Write-Host "$($a.Username.PadRight(16)) " -NoNewline -ForegroundColor Green
+            Write-Host "$($a.Email.PadRight(40)) " -NoNewline -ForegroundColor Green
             Write-Host "* ACTIVE" -ForegroundColor Green
+            Write-Host "       Aliases: $aliasStr" -ForegroundColor DarkGreen
         } else {
             Write-Host "   [$($a.Index)] " -NoNewline -ForegroundColor White
-            Write-Host "$($a.Label.PadRight(18)) " -NoNewline -ForegroundColor White
-            Write-Host "$($a.Username.PadRight(18)) " -NoNewline -ForegroundColor Gray
-            Write-Host "$($a.Email.PadRight(42)) " -NoNewline -ForegroundColor DarkGray
-            Write-Host "(key: $($a.Key))" -ForegroundColor DarkCyan
+            Write-Host "$($a.Label.PadRight(16)) " -NoNewline -ForegroundColor White
+            Write-Host "$($a.Username.PadRight(16)) " -NoNewline -ForegroundColor Gray
+            Write-Host "$($a.Email.PadRight(40)) " -NoNewline -ForegroundColor DarkGray
+            Write-Host ""
+            Write-Host "       Aliases: $aliasStr" -ForegroundColor DarkCyan
         }
     }
     Write-Host "================================================================================" -ForegroundColor DarkGray
@@ -210,7 +213,7 @@ function Switch-Account($acc, [bool]$isLocalSwitch) {
     Write-Host ""
 }
 
-function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string]$passedName, [string]$passedEmail, [string]$passedLabel) {
+function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string]$passedName, [string]$passedEmail, [string]$passedLabel, [string]$passedAliases) {
     Write-Host ""
     Write-Host "=== Add New GitHub Account Profile ===" -ForegroundColor Cyan
     
@@ -269,6 +272,11 @@ function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string
     }
     if (-not $commitEmail) { $commitEmail = $defaultEmail }
 
+    $customAliases = $passedAliases
+    if (-not $customAliases -and -not ($passedUser -and $passedKey)) {
+        $customAliases = Read-Host "Enter additional shortcut aliases (comma-separated, e.g. 'work, w, corp') [optional]"
+    }
+
     $accounts = New-Object System.Collections.ArrayList
     foreach ($item in @(Get-Accounts)) {
         if ($item.Key.ToLower() -ne $key.ToLower() -and $item.Username.ToLower() -ne $user.ToLower()) {
@@ -279,10 +287,24 @@ function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string
     }
 
     $newIdx = $accounts.Count + 1
+    $aliasSet = New-Object System.Collections.Generic.List[string]
+    $null = $aliasSet.Add("$newIdx")
+    if ($aliasSet -notcontains $key.ToLower()) { $null = $aliasSet.Add($key.ToLower()) }
+    if ($aliasSet -notcontains $user.ToLower()) { $null = $aliasSet.Add($user.ToLower()) }
+    if ($customAliases) {
+        $parts = $customAliases -split '[,; ]+'
+        foreach ($p in $parts) {
+            $cleaned = $p.Trim().ToLower()
+            if ($cleaned -and ($aliasSet -notcontains $cleaned)) {
+                $null = $aliasSet.Add($cleaned)
+            }
+        }
+    }
+
     $null = $accounts.Add([PSCustomObject]@{
         Index       = $newIdx
         Key         = $key.ToLower()
-        AliasList   = @("$newIdx", $key.ToLower(), $user.ToLower())
+        AliasList   = @($aliasSet)
         Label       = $label
         Username    = $user
         Name        = $commitName
@@ -299,7 +321,7 @@ function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string
 function Remove-Account([string]$target, [bool]$forceDelete) {
     if (-not $target) {
         Show-List
-        $target = Read-Host "Enter account number, key, or username to remove (or Enter to cancel)"
+        $target = Read-Host "Enter account number, key, username, or alias to remove (or Enter to cancel)"
     }
     if (-not $target) {
         Write-Host "Cancelled." -ForegroundColor Gray
@@ -311,7 +333,8 @@ function Remove-Account([string]$target, [bool]$forceDelete) {
     $match = $null
 
     foreach ($a in $accounts) {
-        if ($a.Index.ToString() -eq $clean -or $a.Key.ToLower() -eq $clean -or $a.Username.ToLower() -eq $clean) {
+        $aliasesLower = @($a.AliasList | ForEach-Object { $_.ToString().ToLower() })
+        if ($a.Index.ToString() -eq $clean -or $a.Key.ToLower() -eq $clean -or $a.Username.ToLower() -eq $clean -or ($aliasesLower -contains $clean)) {
             $match = $a
             break
         }
@@ -342,6 +365,171 @@ function Remove-Account([string]$target, [bool]$forceDelete) {
     } else {
         Write-Host "Cancelled." -ForegroundColor Gray
     }
+}
+
+function Add-Alias-To-Account([string]$target, [string]$newAlias) {
+    $accounts = @(Get-Accounts)
+    if ($accounts.Count -eq 0) {
+        Write-Host "[ERROR] No accounts configured yet. Run 'gswitch add' or 'gswitch setup'." -ForegroundColor Red
+        return
+    }
+
+    if (-not $target) {
+        Show-List
+        $target = Read-Host "Enter account number, key, or username to add alias to"
+    }
+    if (-not $target) {
+        Write-Host "Cancelled." -ForegroundColor Gray
+        return
+    }
+
+    $cleanTarget = $target.Trim().ToLower()
+    $match = $null
+    foreach ($a in $accounts) {
+        $aliasesLower = @($a.AliasList | ForEach-Object { $_.ToString().ToLower() })
+        if ($a.Index.ToString() -eq $cleanTarget -or $a.Key.ToLower() -eq $cleanTarget -or $a.Username.ToLower() -eq $cleanTarget -or ($aliasesLower -contains $cleanTarget)) {
+            $match = $a
+            break
+        }
+    }
+
+    if (-not $match) {
+        Write-Host "[ERROR] Account '$target' not found. Run 'gswitch list' to view accounts." -ForegroundColor Red
+        return
+    }
+
+    if (-not $newAlias) {
+        Write-Host "Account selected: $($match.Label) ($($match.Username))" -ForegroundColor Cyan
+        Write-Host "Current aliases : $($match.AliasList -join ', ')" -ForegroundColor Gray
+        $newAlias = Read-Host "Enter new shortcut alias (e.g. 'w', 'corp', 'main')"
+    }
+    if (-not $newAlias) {
+        Write-Host "Cancelled: alias cannot be empty." -ForegroundColor Gray
+        return
+    }
+
+    $cleanAlias = $newAlias.Trim().ToLower()
+
+    # Check if this alias is already claimed by another account
+    foreach ($a in $accounts) {
+        if ($a.Username.ToLower() -ne $match.Username.ToLower()) {
+            $otherAliases = @($a.AliasList | ForEach-Object { $_.ToString().ToLower() })
+            if ($a.Key.ToLower() -eq $cleanAlias -or $a.Username.ToLower() -eq $cleanAlias -or ($otherAliases -contains $cleanAlias)) {
+                Write-Host "[WARNING] Alias '$cleanAlias' is already used by '$($a.Label)' ($($a.Username))." -ForegroundColor Yellow
+                $confirm = Read-Host "Do you want to reassign this alias to '$($match.Label)'? [y/N]"
+                if ($confirm -notmatch '^[yY]$') {
+                    Write-Host "Cancelled." -ForegroundColor Gray
+                    return
+                }
+                # Remove from other account
+                $newOther = @($a.AliasList | Where-Object { $_.ToString().ToLower() -ne $cleanAlias })
+                $a.AliasList = $newOther
+            }
+        }
+    }
+
+    $curAliases = @($match.AliasList | ForEach-Object { $_.ToString().ToLower() })
+    if ($curAliases -contains $cleanAlias) {
+        Write-Host "[INFO] Account '$($match.Label)' already has alias '$cleanAlias'." -ForegroundColor Yellow
+        return
+    }
+
+    $match.AliasList = @($match.AliasList) + $cleanAlias
+    Save-Accounts $accounts
+    Write-Host ""
+    Write-Host "[OK] Added alias '$cleanAlias' to account '$($match.Label)' ($($match.Username))!" -ForegroundColor Green
+    Write-Host "     All aliases: $($match.AliasList -join ', ')" -ForegroundColor DarkCyan
+    Write-Host ""
+}
+
+function Remove-Alias-From-Account([string]$target, [string]$aliasToRemove) {
+    $accounts = @(Get-Accounts)
+    if ($accounts.Count -eq 0) {
+        Write-Host "[ERROR] No accounts configured yet." -ForegroundColor Red
+        return
+    }
+
+    if (-not $target) {
+        Show-List
+        $target = Read-Host "Enter account number, key, or username to remove alias from"
+    }
+    if (-not $target) {
+        Write-Host "Cancelled." -ForegroundColor Gray
+        return
+    }
+
+    $cleanTarget = $target.Trim().ToLower()
+    $match = $null
+    foreach ($a in $accounts) {
+        $aliasesLower = @($a.AliasList | ForEach-Object { $_.ToString().ToLower() })
+        if ($a.Index.ToString() -eq $cleanTarget -or $a.Key.ToLower() -eq $cleanTarget -or $a.Username.ToLower() -eq $cleanTarget -or ($aliasesLower -contains $cleanTarget)) {
+            $match = $a
+            break
+        }
+    }
+
+    if (-not $match) {
+        Write-Host "[ERROR] Account '$target' not found." -ForegroundColor Red
+        return
+    }
+
+    if (-not $aliasToRemove) {
+        Write-Host "Current aliases for '$($match.Label)': $($match.AliasList -join ', ')" -ForegroundColor Cyan
+        $aliasToRemove = Read-Host "Enter alias to remove"
+    }
+    if (-not $aliasToRemove) {
+        Write-Host "Cancelled." -ForegroundColor Gray
+        return
+    }
+
+    $cleanAlias = $aliasToRemove.Trim().ToLower()
+    $remainingAliases = @($match.AliasList | Where-Object { $_.ToString().ToLower() -ne $cleanAlias })
+
+    if ($remainingAliases.Count -eq $match.AliasList.Count) {
+        Write-Host "[WARNING] Alias '$cleanAlias' was not found on '$($match.Label)'." -ForegroundColor Yellow
+        return
+    }
+
+    $match.AliasList = $remainingAliases
+    Save-Accounts $accounts
+    Write-Host ""
+    Write-Host "[OK] Removed alias '$cleanAlias' from account '$($match.Label)'." -ForegroundColor Green
+    Write-Host "     Remaining aliases: $($match.AliasList -join ', ')" -ForegroundColor DarkCyan
+    Write-Host ""
+}
+
+function Open-ConfigEditor {
+    if (-not (Test-Path $ConfigDir)) {
+        New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+    }
+    if (-not (Test-Path $ConfigFile)) {
+        "[]" | Set-Content -Path $ConfigFile -Encoding UTF8
+    }
+
+    Write-Host ""
+    Write-Host "Configuration file location:" -ForegroundColor Cyan
+    Write-Host "  $ConfigFile" -ForegroundColor Green
+    Write-Host ""
+
+    $codeCmd = Get-Command "code" -ErrorAction SilentlyContinue
+    if ($codeCmd) {
+        Write-Host "Opening in VS Code..." -ForegroundColor DarkGray
+        Start-Process "code" -ArgumentList "`"$ConfigFile`""
+        return
+    }
+
+    if ($IsWindows -or $env:OS -match "Windows") {
+        Write-Host "Opening in Notepad..." -ForegroundColor DarkGray
+        Start-Process "notepad.exe" -ArgumentList "`"$ConfigFile`""
+        return
+    }
+
+    if ($env:EDITOR) {
+        & $env:EDITOR $ConfigFile
+        return
+    }
+
+    Write-Host "You can edit this file directly in your favorite text editor." -ForegroundColor Gray
 }
 
 function Setup-Wizard {
@@ -454,11 +642,14 @@ function Show-HelpMessage {
     Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "USAGE:" -ForegroundColor Yellow
-    Write-Host "  gswitch [account]                   Switch account globally (by key, username, or index)" -ForegroundColor White
+    Write-Host "  gswitch [account]                   Switch account globally (by key, username, alias, or index)" -ForegroundColor White
     Write-Host "  gswitch -l [account]                Switch account locally (current repository only)" -ForegroundColor White
     Write-Host "  gswitch                             Open interactive account selection menu" -ForegroundColor White
     Write-Host "  gswitch status | who                View active GitHub token & Git identities" -ForegroundColor White
-    Write-Host "  gswitch list | ls                   List all configured account profiles" -ForegroundColor White
+    Write-Host "  gswitch list | ls                   List all configured account profiles with aliases" -ForegroundColor White
+    Write-Host "  gswitch alias [acc] [shortcut]      Add or view shortcut aliases for quick switching" -ForegroundColor White
+    Write-Host "  gswitch unalias [acc] [alias]       Remove a shortcut alias from an account profile" -ForegroundColor White
+    Write-Host "  gswitch edit | config               Open accounts.json in VS Code / Notepad" -ForegroundColor White
     Write-Host "  gswitch sync                        Auto-discover & sync accounts from GitHub CLI" -ForegroundColor White
     Write-Host "  gswitch setup                       Launch interactive first-time setup wizard" -ForegroundColor White
     Write-Host "  gswitch add [user] [key] [name] [email]  Add or update an account profile" -ForegroundColor White
@@ -467,7 +658,10 @@ function Show-HelpMessage {
     Write-Host ""
     Write-Host "COMMANDS:" -ForegroundColor Yellow
     Write-Host "  add      Add a new profile interactively or via args: gswitch add <user> <key> [name] [email]" -ForegroundColor White
-    Write-Host "  remove   Remove a profile by key, user, or index: gswitch remove <key> [-f]" -ForegroundColor White
+    Write-Host "  alias    Add shortcut alias: gswitch alias <acc> <shortcut> (or list all if no args)" -ForegroundColor White
+    Write-Host "  unalias  Remove shortcut alias: gswitch unalias <acc> <shortcut>" -ForegroundColor White
+    Write-Host "  edit     Open accounts.json directly in VS Code / Notepad / default editor" -ForegroundColor White
+    Write-Host "  remove   Remove a profile by key, user, alias, or index: gswitch remove <key> [-f]" -ForegroundColor White
     Write-Host "  sync     Scan 'gh auth status', fetch IDs, and configure private noreply emails" -ForegroundColor White
     Write-Host "  setup    Launch the first-time guided setup wizard" -ForegroundColor White
     Write-Host "  status   Display active GitHub CLI user and global/local Git user.name & email" -ForegroundColor White
@@ -484,6 +678,9 @@ function Show-HelpMessage {
     Write-Host "  gswitch work                        # Switch to 'work' profile globally" -ForegroundColor Gray
     Write-Host "  gswitch 1                           # Switch to profile #1" -ForegroundColor Gray
     Write-Host "  gswitch -l work                     # Apply 'work' author to THIS repository only" -ForegroundColor Gray
+    Write-Host "  gswitch alias work w                # Add shortcut alias 'w' to work account" -ForegroundColor Gray
+    Write-Host "  gswitch unalias work w              # Remove shortcut alias 'w' from work" -ForegroundColor Gray
+    Write-Host "  gswitch edit                        # Open accounts.json in editor" -ForegroundColor Gray
     Write-Host "  gswitch sync                        # Auto-import all accounts from 'gh auth status'" -ForegroundColor Gray
     Write-Host "  gswitch add                         # Add a new account interactively" -ForegroundColor Gray
     Write-Host "  gswitch add octocat work            # Add 'octocat' with key 'work' non-interactively" -ForegroundColor Gray
@@ -529,6 +726,25 @@ if ($Command -eq "add") {
     exit 0
 }
 
+if ($Command -in @("alias", "aliases", "shortcut")) {
+    if (-not $Argument) {
+        Show-List
+        exit 0
+    }
+    Add-Alias-To-Account $Argument $Extra1
+    exit 0
+}
+
+if ($Command -in @("unalias", "rmalias")) {
+    Remove-Alias-From-Account $Argument $Extra1
+    exit 0
+}
+
+if ($Command -in @("edit", "config")) {
+    Open-ConfigEditor
+    exit 0
+}
+
 if ($Command -in @("remove", "rm", "delete")) {
     $isForce = $Force.IsPresent -or ($Extra1 -in @("-f", "--force", "-y", "--yes")) -or ($Argument -in @("-f", "--force"))
     $target = if ($Argument -in @("-f", "--force")) { $Extra1 } else { $Argument }
@@ -564,19 +780,24 @@ if (-not $targetArg) {
     Show-Status
     Write-Host "Available accounts:" -ForegroundColor Yellow
     foreach ($a in $accounts) {
+        $aliasStr = if ($a.AliasList) { ($a.AliasList -join ', ') } else { "$($a.Index), $($a.Key)" }
         Write-Host " [$($a.Index)] " -NoNewline -ForegroundColor White
-        Write-Host "$($a.Label.PadRight(18)) " -NoNewline -ForegroundColor Green
-        Write-Host "$($a.Email.PadRight(48)) " -NoNewline -ForegroundColor Gray
-        Write-Host "(key: $($a.Key))" -ForegroundColor DarkCyan
+        Write-Host "$($a.Label.PadRight(16)) " -NoNewline -ForegroundColor Green
+        Write-Host "$($a.Email.PadRight(40)) " -NoNewline -ForegroundColor Gray
+        Write-Host "(aliases: $aliasStr)" -ForegroundColor DarkCyan
     }
     Write-Host ""
-    $choice = Read-Host "Select account [1-$($accounts.Count)], 's' to sync, 'a' to add, or Enter to cancel"
+    $choice = Read-Host "Select account [1-$($accounts.Count)], 's' to sync, 'a' to add, 'e' to edit, or Enter to cancel"
     if ($choice -match '^[sS]$') {
         Sync-FromGitHubCli
         exit 0
     }
     if ($choice -match '^[aA]$') {
         Add-AccountInteractive
+        exit 0
+    }
+    if ($choice -match '^[eE]$') {
+        Open-ConfigEditor
         exit 0
     }
     if ($choice) {

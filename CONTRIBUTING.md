@@ -25,6 +25,11 @@ git-account-switcher/
 ├── config/
 │   ├── accounts.example.json      # Generic 3-account sample configuration
 │   └── accounts.json              # Default template copied on first installation
+├── docs/
+│   ├── README.md                  # Documentation Hub index
+│   ├── workflow.md                # 6-Phase Complete Workflow Guide
+│   ├── configuration.md           # Schema specification & real-world examples
+│   └── troubleshooting.md         # FAQ & troubleshooting solutions
 ├── tests/
 │   ├── test-all.ps1               # Automated test suite for PowerShell
 │   └── test-all.sh                # Automated test suite for POSIX Bash
@@ -35,7 +40,7 @@ git-account-switcher/
 ├── AGENT.md                       # AI Agent autonomous execution protocol
 ├── CONTRIBUTING.md                # Development & contribution guide
 ├── LICENSE                        # MIT License
-└── README.md                      # Main documentation & complete workflow
+└── README.md                      # Main project landing page
 ```
 
 ---
@@ -105,6 +110,7 @@ The test suites verify:
 - ✅ Non-interactive profile creation (`add`)
 - ✅ Multi-profile addition and index assignment
 - ✅ In-place profile updates without duplicate entries
+- ✅ Shortcut alias assignment (`alias`) and removal (`unalias`)
 - ✅ Profile removal (`remove -f`) and re-indexing
 
 ---
@@ -126,5 +132,16 @@ The test suites verify:
 4. **Submit Your PR:**
    - Push your branch to your fork and submit a PR to `master`.
    - Describe what the PR accomplishes and mention any relevant issues.
+
+---
+
+## 📚 Related Documentation
+
+- 🏠 [Main Project README](README.md)
+- 📚 [Documentation Hub](docs/README.md)
+- 🚀 [Complete Workflow Guide](docs/workflow.md)
+- ⚙️ [Configuration & Schema Guide](docs/configuration.md)
+- ❓ [Troubleshooting & FAQ](docs/troubleshooting.md)
+- 🤖 [Autonomous AI Agent Protocol](AGENT.md)
 
 Thank you for helping make `git-account-switcher` great! 🚀

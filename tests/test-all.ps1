@@ -107,6 +107,28 @@ try {
         }
     }
 
+    Assert-Test "Add shortcut alias ('alias work w')" {
+        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 alias work w 2>&1
+        $raw = Get-Content -Path $sandboxConfig -Raw
+        $json = $raw | ConvertFrom-Json
+        $workAcc = $json | Where-Object { $_.key -eq "work" }
+        $aliases = @($workAcc.aliases | ForEach-Object { $_.ToString().ToLower() })
+        if ($aliases -notcontains "w") {
+            throw "Expected alias 'w' in work account aliases, found: $($aliases -join ', ')"
+        }
+    }
+
+    Assert-Test "Remove shortcut alias ('unalias work w')" {
+        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 unalias work w 2>&1
+        $raw = Get-Content -Path $sandboxConfig -Raw
+        $json = $raw | ConvertFrom-Json
+        $workAcc = $json | Where-Object { $_.key -eq "work" }
+        $aliases = @($workAcc.aliases | ForEach-Object { $_.ToString().ToLower() })
+        if ($aliases -contains "w") {
+            throw "Expected alias 'w' to be removed from work account aliases, found: $($aliases -join ', ')"
+        }
+    }
+
     Assert-Test "Remove profile ('remove school -f')" {
         $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 remove school -f 2>&1
         $raw = Get-Content -Path $sandboxConfig -Raw
