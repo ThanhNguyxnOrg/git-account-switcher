@@ -46,17 +46,28 @@ if (-not (Test-Path $binDir)) {
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 }
 
-$sourceBin = Join-Path $PSScriptRoot "bin"
+$RAW_BASE = "https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master"
+$isLocal = ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "bin")))
+
 $filesToCopy = @(
     "git-account-switcher.ps1", "git-account-switcher.cmd", "git-account-switcher",
     "gswitch.cmd", "gswitch",
     "switch-git.ps1", "switch-git.cmd", "switch-git"
 )
+
 foreach ($file in $filesToCopy) {
-    $srcPath = Join-Path $sourceBin $file
-    if (Test-Path $srcPath) {
-        Copy-Item -Path $srcPath -Destination $binDir -Force
-        Write-Host "  [OK] Installed $file -> $binDir" -ForegroundColor Green
+    $destFile = Join-Path $binDir $file
+    if ($isLocal) {
+        $srcPath = Join-Path (Join-Path $PSScriptRoot "bin") $file
+        if (Test-Path $srcPath) {
+            Copy-Item -Path $srcPath -Destination $binDir -Force
+            Write-Host "  [OK] Installed $file -> $binDir" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  Downloading $file..." -ForegroundColor DarkCyan
+        $fileUrl = "$RAW_BASE/bin/$file"
+        Invoke-RestMethod -Uri $fileUrl -OutFile $destFile
+        Write-Host "  [OK] Downloaded and installed $file -> $binDir" -ForegroundColor Green
     }
 }
 
@@ -80,7 +91,6 @@ if (-not (Test-Path $configDir)) {
 }
 
 $destConfig = Join-Path $configDir "accounts.json"
-$srcExample = Join-Path $PSScriptRoot "config\accounts.example.json"
 
 if ((-not (Test-Path $destConfig)) -or $Force) {
     # Check if gh has logged in accounts to auto-sync
@@ -88,9 +98,19 @@ if ((-not (Test-Path $destConfig)) -or $Force) {
     if ($statusCheck -match 'Logged in to .* account') {
         Write-Host "  Detected active GitHub CLI accounts! Running auto-discovery..." -ForegroundColor DarkCyan
         & "$binDir\git-account-switcher.ps1" sync
-    } elseif (Test-Path $srcExample) {
-        Copy-Item -Path $srcExample -Destination $destConfig -Force
+    } elseif ($isLocal -and (Test-Path (Join-Path $PSScriptRoot "config\accounts.example.json"))) {
+        Copy-Item -Path (Join-Path $PSScriptRoot "config\accounts.example.json") -Destination $destConfig -Force
         Write-Host "  [OK] Deployed template accounts.json -> $destConfig" -ForegroundColor Green
+    } else {
+        Write-Host "  Deploying default configuration template..." -ForegroundColor DarkCyan
+        $exampleUrl = "$RAW_BASE/config/accounts.example.json"
+        try {
+            Invoke-RestMethod -Uri $exampleUrl -OutFile $destConfig
+            Write-Host "  [OK] Downloaded template accounts.json -> $destConfig" -ForegroundColor Green
+        } catch {
+            Write-Host "  [INFO] Initialized empty configuration at $destConfig." -ForegroundColor Gray
+            Set-Content -Path $destConfig -Value "[]" -Encoding UTF8
+        }
     }
 } else {
     Write-Host "  [INFO] Existing configuration preserved at $destConfig." -ForegroundColor Green

@@ -19,6 +19,8 @@ git-account-switcher/
 ├── bin/
 │   ├── git-account-switcher.ps1   # Primary PowerShell implementation (Windows)
 │   ├── git-account-switcher       # Primary POSIX Bash implementation (macOS / Linux)
+│   ├── gswitch.cmd                # Primary short alias wrapper for Windows
+│   ├── gswitch                    # Primary short alias wrapper for macOS / Linux
 │   ├── switch-git.ps1             # Backward-compatible PowerShell alias wrapper
 │   ├── switch-git.cmd             # Windows Command Prompt (CMD) wrapper
 │   └── switch-git                 # Backward-compatible Bash alias wrapper
