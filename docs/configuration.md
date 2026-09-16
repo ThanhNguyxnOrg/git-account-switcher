@@ -208,6 +208,14 @@ gswitch bind ~/projects/work work
 *What happens under the hood:*  
 `gswitch` automatically creates `~/.gitconfig-<key>` with the account's name and noreply email, then registers a case-insensitive `[includeIf "gitdir/i:<folder>/**"]` entry inside your global `~/.gitconfig`. Every repository inside that folder will instantly commit under that identity without typing any switch command!
 
+> 💡 **Checking Identity Inside a Bound Folder:**  
+> Run `git who` (or `gswitch status`) inside any repository within the bound directory to verify. `gswitch` will detect the `includeIf` rule and report:
+> ```text
+> [Folder Override via includeIf detected]
+> Git Folder Name   : Mona Corporate
+> Git Folder Email  : mona@enterprise.com
+> ```
+
 ### 2. Inspect All Active Folder Bindings
 ```bash
 gswitch bindings
