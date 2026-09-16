@@ -1,11 +1,11 @@
 # switch-git ⚡
 
 > **The missing bridge between Git commit identities and GitHub CLI authentication.**  
-> Switch GitHub accounts, active OAuth tokens, commit authors, and private noreply emails in a single command — with zero SSH configuration needed.
+> Switch GitHub accounts, active OAuth tokens, commit authors, and private noreply emails in a single command — with zero SSH configuration needed. Works natively across **Windows**, **macOS**, and **Linux**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows | macOS | Linux](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
-[![Shell: PowerShell | Bash](https://img.shields.io/badge/Shell-PowerShell%20%7C%20Bash-blueviolet.svg)]()
+[![Shell: PowerShell | Bash | Zsh](https://img.shields.io/badge/Shell-PowerShell%20%7C%20Bash%20%7C%20Zsh-blueviolet.svg)]()
 [![Git: >= 2.13](https://img.shields.io/badge/Git-%3E%3D%202.13-orange.svg)](https://git-scm.com/)
 [![GitHub CLI: >= 2.24](https://img.shields.io/badge/GitHub%20CLI-%3E%3D%202.24-green.svg)](https://cli.github.com/)
 
@@ -47,7 +47,7 @@ Developers managing multiple GitHub accounts (e.g., **Personal**, **Work**, and 
 
 - ⚡ **Single Command Switch:** Switch active token and git author in under 1 second.
 - 🔒 **Privacy First:** Configured out-of-the-box with GitHub's private noreply emails (`<id>+<username>@users.noreply.github.com`).
-- 🖥️ **Cross-Shell & Terminal Agnostic:** Works in Windows PowerShell, Command Prompt, Git Bash, macOS/Linux bash, VS Code, and Antigravity IDE.
+- 🌐 **100% Cross-Platform:** Native support for Windows (PowerShell/CMD), macOS, and Linux (Bash/Zsh).
 - 🎨 **Interactive Menu:** Run `switch-git` without arguments to launch a clean terminal selector.
 - 🛠️ **Native Git Aliases:** Integrated seamlessly into `git who` and `git switch-acc`.
 - 📁 **Folder Isolation Compatible:** Fully interoperable with Git's native `includeIf` conditional configs.
@@ -57,7 +57,7 @@ Developers managing multiple GitHub accounts (e.g., **Personal**, **Work**, and 
 
 ## 📦 Installation
 
-### Quick Install (Windows PowerShell)
+### Windows (PowerShell)
 
 Run PowerShell in the repository root:
 
@@ -65,9 +65,18 @@ Run PowerShell in the repository root:
 .\install.ps1
 ```
 
+### macOS & Linux (Bash / Zsh)
+
+Run in terminal:
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
 The installer will:
-1. Copy executables to your user binary path (`~/.local/bin`).
-2. Add `~/.local/bin` to your environment `PATH` if not already present.
+1. Copy executable scripts to your local user binary path (`~/.local/bin`).
+2. Ensure `~/.local/bin` is in your environment `PATH`.
 3. Deploy your account profile configuration to `~/.config/switch-git/accounts.json`.
 4. Configure Git's credential helper to use GitHub CLI (`gh auth git-credential`).
 5. Register global Git aliases: `git who` and `git switch-acc`.
@@ -84,7 +93,7 @@ switch-git real       # Switch to Primary / Personal account
 switch-git 07         # Switch to Secondary / Work account
 ```
 
-*(You can also use numbers: `switch-git 1`, `switch-git 2`, `switch-git 3`)*
+*(You can also use index numbers: `switch-git 1`, `switch-git 2`, `switch-git 3`)*
 
 ### 2. Interactive Selection Menu
 
@@ -165,7 +174,7 @@ Account profiles are stored in:
    ```bash
    gh api user --jq "{id: .id, login: .login}"
    ```
-3. Your noreply email format is:
+3. Your private noreply email is:
    ```
    <id>+<login>@users.noreply.github.com
    ```
@@ -196,15 +205,18 @@ With this setup:
 
 ## 🗑️ Uninstallation
 
-To remove `switch-git` from your environment:
-
+### Windows
 ```powershell
 .\uninstall.ps1
+# To purge config as well:
+.\uninstall.ps1 -PurgeConfig
 ```
 
-To also delete custom configurations:
-```powershell
-.\uninstall.ps1 -PurgeConfig
+### macOS & Linux
+```bash
+./uninstall.sh
+# To purge config as well:
+./uninstall.sh --purge
 ```
 
 ---
