@@ -141,6 +141,14 @@ try {
         }
     }
 
+    Assert-Test "List folder bindings command ('bindings')" {
+        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 bindings 2>&1
+        $outStr = ($out | Out-String)
+        if ($outStr -notmatch "Configured Folder Bindings") {
+            throw "Expected bindings output, got: $outStr"
+        }
+    }
+
 } finally {
     Remove-Item -Path $sandboxDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item env:GIT_ACCOUNT_SWITCHER_CONFIG -ErrorAction SilentlyContinue

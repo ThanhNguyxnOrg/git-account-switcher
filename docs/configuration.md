@@ -192,31 +192,34 @@ Open `https://api.github.com/users/<your-username>` and look for the `"id"` fiel
 
 ---
 
-## 📂 Bonus: Automatic Folder Isolation (`includeIf`)
+## 📂 Automatic Folder Isolation (`gswitch bind` / `includeIf`)
 
-If you prefer Git to automatically swap your author identity based on which folder you enter on your filesystem, you can integrate Git's native conditional includes with `git-account-switcher`:
+If you want all Git repositories inside a specific folder (e.g. `D:\Code\Work` or `~/work`) to **permanently and automatically commit as a specific account**, `gswitch` provides built-in automated folder binding using Git's native `includeIf` mechanism:
 
-Add to your `~/.gitconfig`:
-```gitconfig
-# Default personal identity
-[user]
-    name = Mona Lisa
-    email = 583231+octocat@users.noreply.github.com
+### 1. Bind a Folder to an Account
+```bash
+# Windows
+gswitch bind D:\Code\Work work
 
-# Automatically override identity when inside work projects folder
-[includeIf "gitdir:~/work/**"]
-    path = ~/.gitconfig-work
+# macOS / Linux
+gswitch bind ~/work work
 ```
 
-And inside `~/.gitconfig-work`:
-```gitconfig
-[user]
-    name = Mona Corporate
-    email = mona@enterprise.com
+*What happens under the hood:*  
+`gswitch` automatically creates `~/.gitconfig-<key>` with the account's name and noreply email, then registers a case-insensitive `[includeIf "gitdir/i:<folder>/**"]` entry inside your global `~/.gitconfig`. Every repository inside that folder will instantly commit under that identity without typing any switch command!
+
+### 2. Inspect All Active Folder Bindings
+```bash
+gswitch bindings
 ```
 
-> **Why you still need `gswitch`:**  
-> While `includeIf` handles Git's commit author inside specific folders, it **cannot** switch GitHub CLI authentication tokens (`gh auth switch`). When creating pull requests, reading issues, or pushing over HTTPS via `gh`, you use `gswitch work` to align both layers simultaneously.
+### 3. Remove a Folder Binding
+```bash
+gswitch unbind D:\Code\Work
+```
+
+> **Why you still use `gswitch` for GitHub CLI:**  
+> While folder binding automatically locks Git's commit authorship inside that folder, running `gswitch <key>` or `gswitch` synchronizes your active GitHub CLI push token (`gh auth switch`) when pushing over HTTPS, submitting PRs, or managing issues.
 
 ---
 

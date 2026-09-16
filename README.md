@@ -105,7 +105,9 @@ git who               # Check who is currently active
 | `gswitch status` | `gswitch current`, `git who` | Inspect active GitHub token, global identity, and local repo override |
 | `gswitch list` | `gswitch ls` | List all profiles with active status and assigned shortcut aliases |
 | `gswitch alias <acc> <new>`| | Assign a new shortcut alias (e.g. `gswitch alias work w`) |
-| `gswitch unalias <acc> <a>`| | Remove a shortcut alias from a profile |
+| `gswitch bind <dir> <acc>`| `gswitch folder` | Permanently bind an entire folder/dir to an account (`includeIf`) |
+| `gswitch unbind <dir>` | `gswitch unlink` | Remove a folder-to-account binding |
+| `gswitch bindings` | `gswitch dirs` | List all active folder-to-account bindings |
 | `gswitch edit` | `gswitch config` | Open `accounts.json` in VS Code / Notepad / default editor |
 | `gswitch sync` | `gswitch import` | Auto-detect all accounts logged into `gh` and fetch privacy IDs |
 | `gswitch setup` | `gswitch init` | Run the guided first-time interactive setup wizard |

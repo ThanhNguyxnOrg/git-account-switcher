@@ -128,11 +128,19 @@ function Show-Status {
     Write-Host " Git Global Name   : " -NoNewline; Write-Host "$globalName" -ForegroundColor Green
     Write-Host " Git Global Email  : " -NoNewline; Write-Host "$globalEmail" -ForegroundColor Green
     
+    $effectiveName  = git config user.name 2>$null
+    $effectiveEmail = git config user.email 2>$null
+
     if ($isRepo -and ($localName -or $localEmail)) {
         Write-Host " ------------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host " [Repo Local Override detected in current directory]" -ForegroundColor Yellow
         Write-Host " Git Local Name    : " -NoNewline; Write-Host "$localName" -ForegroundColor Yellow
         Write-Host " Git Local Email   : " -NoNewline; Write-Host "$localEmail" -ForegroundColor Yellow
+    } elseif ($effectiveEmail -and ($effectiveEmail -ne $globalEmail -or $effectiveName -ne $globalName)) {
+        Write-Host " ------------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host " [Folder includeIf Binding Active in this directory]" -ForegroundColor Yellow
+        Write-Host " Effective Name    : " -NoNewline; Write-Host "$effectiveName" -ForegroundColor Yellow
+        Write-Host " Effective Email   : " -NoNewline; Write-Host "$effectiveEmail" -ForegroundColor Yellow
     }
     Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
@@ -532,6 +540,134 @@ function Open-ConfigEditor {
     Write-Host "You can edit this file directly in your favorite text editor." -ForegroundColor Gray
 }
 
+function Bind-FolderToAccount([string]$folderPath, [string]$targetAccount) {
+    if (-not $folderPath) {
+        $folderPath = Read-Host "Enter folder path to bind (e.g. D:\Code\Work or ~/work)"
+    }
+    if (-not $folderPath) {
+        Write-Host "Cancelled: folder path cannot be empty." -ForegroundColor Gray
+        return
+    }
+
+    $resolvedFolder = $folderPath
+    try {
+        if (Test-Path $folderPath) {
+            $resolvedFolder = (Resolve-Path $folderPath).Path
+        }
+    } catch {}
+
+    $accounts = @(Get-Accounts)
+    if ($accounts.Count -eq 0) {
+        Write-Host "[ERROR] No accounts configured yet." -ForegroundColor Red
+        return
+    }
+
+    if (-not $targetAccount) {
+        Show-List
+        $targetAccount = Read-Host "Enter account number, key, username, or alias to bind to this folder"
+    }
+    if (-not $targetAccount) {
+        Write-Host "Cancelled." -ForegroundColor Gray
+        return
+    }
+
+    $cleanTarget = $targetAccount.Trim().ToLower()
+    $match = $null
+    foreach ($a in $accounts) {
+        $aliasesLower = @($a.AliasList | ForEach-Object { $_.ToString().ToLower() })
+        if ($a.Index.ToString() -eq $cleanTarget -or $a.Key.ToLower() -eq $cleanTarget -or $a.Username.ToLower() -eq $cleanTarget -or ($aliasesLower -contains $cleanTarget)) {
+            $match = $a
+            break
+        }
+    }
+
+    if (-not $match) {
+        Write-Host "[ERROR] Account '$targetAccount' not found." -ForegroundColor Red
+        return
+    }
+
+    # Normalize folder path for gitdir (must use forward slashes / and end with /)
+    $gitdirPattern = $resolvedFolder.Replace('\', '/').TrimEnd('/') + '/'
+
+    # 1. Create included gitconfig file
+    $profileConfigFile = "$HOME\.gitconfig-$($match.Key)"
+    $configContent = "[user]`n    name = $($match.Name)`n    email = $($match.Email)`n"
+    $configContent | Set-Content -Path $profileConfigFile -Encoding UTF8
+
+    # 2. Add to global ~/.gitconfig
+    $includeKey = if ($IsWindows -or $env:OS -match "Windows") { "includeIf.gitdir/i:$gitdirPattern.path" } else { "includeIf.gitdir:$gitdirPattern.path" }
+    $normalizedProfileConfig = $profileConfigFile.Replace('\', '/')
+    git config --global $includeKey $normalizedProfileConfig
+
+    Write-Host ""
+    Write-Host "[OK] Folder '$resolvedFolder' successfully bound to account '$($match.Label)'!" -ForegroundColor Green
+    Write-Host "     All Git repositories inside '$resolvedFolder' will automatically commit as:" -ForegroundColor Cyan
+    Write-Host "     Name : $($match.Name)" -ForegroundColor Green
+    Write-Host "     Email: $($match.Email)" -ForegroundColor Green
+    Write-Host ""
+}
+
+function Unbind-Folder([string]$folderPath) {
+    if (-not $folderPath) {
+        Show-FolderBindings
+        $folderPath = Read-Host "Enter folder path to unbind (or Enter to cancel)"
+    }
+    if (-not $folderPath) {
+        Write-Host "Cancelled." -ForegroundColor Gray
+        return
+    }
+
+    $resolvedFolder = $folderPath
+    try {
+        if (Test-Path $folderPath) {
+            $resolvedFolder = (Resolve-Path $folderPath).Path
+        }
+    } catch {}
+    $gitdirPattern = $resolvedFolder.Replace('\', '/').TrimEnd('/') + '/'
+
+    $keys = git config --global --name-only --get-regexp '^includeif\.gitdir' 2>$null
+    $found = $false
+    foreach ($k in $keys) {
+        if ($k -like "*$gitdirPattern*") {
+            git config --global --unset $k
+            $found = $true
+        }
+    }
+
+    if ($found) {
+        Write-Host ""
+        Write-Host "[OK] Unbound folder '$resolvedFolder'." -ForegroundColor Green
+        Write-Host ""
+    } else {
+        Write-Host ""
+        Write-Host "[WARNING] No binding found matching '$resolvedFolder'." -ForegroundColor Yellow
+        Write-Host ""
+    }
+}
+
+function Show-FolderBindings {
+    Write-Host ""
+    Write-Host "Configured Folder Bindings (includeIf):" -ForegroundColor Yellow
+    Write-Host "================================================================================" -ForegroundColor DarkGray
+    $lines = git config --global --list --show-origin 2>$null | Where-Object { $_ -match 'includeif\.gitdir' }
+    if (-not $lines) {
+        Write-Host "  No folder bindings configured." -ForegroundColor Gray
+        Write-Host "  Use 'gswitch bind <folder> <account>' to bind a folder to an account." -ForegroundColor DarkCyan
+    } else {
+        foreach ($l in $lines) {
+            if ($l -match 'includeif\.gitdir(?:/i)?:(.*)\.path=(.*)') {
+                $dir = $matches[1]
+                $cfg = $matches[2]
+                Write-Host "  Folder : " -NoNewline; Write-Host "$dir" -ForegroundColor Green
+                Write-Host "  Config : " -NoNewline; Write-Host "$cfg" -ForegroundColor DarkCyan
+                Write-Host ""
+            }
+        }
+    }
+    Write-Host "================================================================================" -ForegroundColor DarkGray
+    Write-Host ""
+}
+
 function Setup-Wizard {
     Write-Host ""
     Write-Host "============================================================" -ForegroundColor Cyan
@@ -649,6 +785,9 @@ function Show-HelpMessage {
     Write-Host "  gswitch list | ls                   List all configured account profiles with aliases" -ForegroundColor White
     Write-Host "  gswitch alias [acc] [shortcut]      Add or view shortcut aliases for quick switching" -ForegroundColor White
     Write-Host "  gswitch unalias [acc] [alias]       Remove a shortcut alias from an account profile" -ForegroundColor White
+    Write-Host "  gswitch bind [dir] [account]        Permanently bind an entire folder to an account" -ForegroundColor White
+    Write-Host "  gswitch unbind [dir]                Remove a folder binding" -ForegroundColor White
+    Write-Host "  gswitch bindings                    List all active folder bindings (includeIf)" -ForegroundColor White
     Write-Host "  gswitch edit | config               Open accounts.json in VS Code / Notepad" -ForegroundColor White
     Write-Host "  gswitch sync                        Auto-discover & sync accounts from GitHub CLI" -ForegroundColor White
     Write-Host "  gswitch setup                       Launch interactive first-time setup wizard" -ForegroundColor White
@@ -660,6 +799,9 @@ function Show-HelpMessage {
     Write-Host "  add      Add a new profile interactively or via args: gswitch add <user> <key> [name] [email]" -ForegroundColor White
     Write-Host "  alias    Add shortcut alias: gswitch alias <acc> <shortcut> (or list all if no args)" -ForegroundColor White
     Write-Host "  unalias  Remove shortcut alias: gswitch unalias <acc> <shortcut>" -ForegroundColor White
+    Write-Host "  bind     Bind a directory to an account (includeIf): gswitch bind <dir> <account>" -ForegroundColor White
+    Write-Host "  unbind   Remove a folder binding: gswitch unbind <dir>" -ForegroundColor White
+    Write-Host "  bindings List all active directory bindings configured on system" -ForegroundColor White
     Write-Host "  edit     Open accounts.json directly in VS Code / Notepad / default editor" -ForegroundColor White
     Write-Host "  remove   Remove a profile by key, user, alias, or index: gswitch remove <key> [-f]" -ForegroundColor White
     Write-Host "  sync     Scan 'gh auth status', fetch IDs, and configure private noreply emails" -ForegroundColor White
@@ -680,6 +822,9 @@ function Show-HelpMessage {
     Write-Host "  gswitch -l work                     # Apply 'work' author to THIS repository only" -ForegroundColor Gray
     Write-Host "  gswitch alias work w                # Add shortcut alias 'w' to work account" -ForegroundColor Gray
     Write-Host "  gswitch unalias work w              # Remove shortcut alias 'w' from work" -ForegroundColor Gray
+    Write-Host "  gswitch bind D:\Code\Work work      # All repos in D:\Code\Work commit as work" -ForegroundColor Gray
+    Write-Host "  gswitch unbind D:\Code\Work         # Remove folder binding" -ForegroundColor Gray
+    Write-Host "  gswitch bindings                    # View all active folder bindings" -ForegroundColor Gray
     Write-Host "  gswitch edit                        # Open accounts.json in editor" -ForegroundColor Gray
     Write-Host "  gswitch sync                        # Auto-import all accounts from 'gh auth status'" -ForegroundColor Gray
     Write-Host "  gswitch add                         # Add a new account interactively" -ForegroundColor Gray
@@ -737,6 +882,21 @@ if ($Command -in @("alias", "aliases", "shortcut")) {
 
 if ($Command -in @("unalias", "rmalias")) {
     Remove-Alias-From-Account $Argument $Extra1
+    exit 0
+}
+
+if ($Command -in @("bind", "folder", "link")) {
+    Bind-FolderToAccount $Argument $Extra1
+    exit 0
+}
+
+if ($Command -in @("unbind", "unlink")) {
+    Unbind-Folder $Argument
+    exit 0
+}
+
+if ($Command -in @("bindings", "folders", "dirs")) {
+    Show-FolderBindings
     exit 0
 }
 
