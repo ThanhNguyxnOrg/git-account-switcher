@@ -36,33 +36,36 @@ param(
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$ConfigFile = "$HOME\.config\git-account-switcher\accounts.json"
-$ConfigDir  = "$HOME\.config\git-account-switcher"
+$ConfigFile = if ($env:GIT_ACCOUNT_SWITCHER_CONFIG) { $env:GIT_ACCOUNT_SWITCHER_CONFIG } else { "$HOME\.config\git-account-switcher\accounts.json" }
+$ConfigDir  = if ($ConfigFile) { [System.IO.Path]::GetDirectoryName($ConfigFile) } else { "$HOME\.config\git-account-switcher" }
 
 function Get-Accounts {
-    $list = @()
+    $list = New-Object System.Collections.ArrayList
     if (Test-Path $ConfigFile) {
         try {
-            $json = Get-Content -Path $ConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
-            $idx = 1
-            foreach ($item in $json) {
-                $list += @{
-                    Index       = $idx
-                    Key         = [string]$item.key
-                    AliasList   = [string[]]$item.aliases
-                    Label       = [string]$item.label
-                    Username    = [string]$item.username
-                    Name        = [string]$item.name
-                    Email       = [string]$item.email
-                    Description = [string]$item.description
+            $raw = Get-Content -Path $ConfigFile -Raw -Encoding UTF8
+            if ($raw -and $raw.Trim()) {
+                $json = $raw | ConvertFrom-Json
+                $idx = 1
+                foreach ($item in $json) {
+                    $null = $list.Add([PSCustomObject]@{
+                        Index       = $idx
+                        Key         = [string]$item.key
+                        AliasList   = [string[]]$item.aliases
+                        Label       = [string]$item.label
+                        Username    = [string]$item.username
+                        Name        = [string]$item.name
+                        Email       = [string]$item.email
+                        Description = [string]$item.description
+                    })
+                    $idx++
                 }
-                $idx++
             }
         } catch {
             Write-Host "[WARNING] Could not parse $ConfigFile : $_" -ForegroundColor Yellow
         }
     }
-    return $list
+    return @($list)
 }
 
 function Save-Accounts($accountsList) {
@@ -71,20 +74,28 @@ function Save-Accounts($accountsList) {
     }
     $export = @()
     $idx = 1
-    foreach ($a in $accountsList) {
+    foreach ($a in @($accountsList)) {
         $export += [PSCustomObject]@{
             index       = $idx
-            key         = $a.Key
-            aliases     = $a.AliasList
-            label       = $a.Label
-            username    = $a.Username
-            name        = $a.Name
-            email       = $a.Email
-            description = $a.Description
+            key         = [string]$a.Key
+            aliases     = [string[]]$a.AliasList
+            label       = [string]$a.Label
+            username    = [string]$a.Username
+            name        = [string]$a.Name
+            email       = [string]$a.Email
+            description = [string]$a.Description
         }
         $idx++
     }
-    $export | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFile -Encoding UTF8
+
+    if ($export.Count -eq 0) {
+        "[]" | Set-Content -Path $ConfigFile -Encoding UTF8
+    } elseif ($export.Count -eq 1) {
+        $single = $export[0] | ConvertTo-Json -Depth 5
+        "[`n$single`n]" | Set-Content -Path $ConfigFile -Encoding UTF8
+    } else {
+        $export | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigFile -Encoding UTF8
+    }
 }
 
 function Get-ActiveGhUser {
@@ -258,15 +269,17 @@ function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string
     }
     if (-not $commitEmail) { $commitEmail = $defaultEmail }
 
-    $accounts = Get-Accounts
-    $existingMatch = $accounts | Where-Object { $_.Key.ToLower() -eq $key.ToLower() -or $_.Username.ToLower() -eq $user.ToLower() }
-    if ($existingMatch) {
-        Write-Host "[INFO] Updating existing profile for '$($existingMatch.Label)' ($($existingMatch.Username))..." -ForegroundColor Yellow
-        $accounts = @($accounts | Where-Object { $_.Key.ToLower() -ne $key.ToLower() -and $_.Username.ToLower() -ne $user.ToLower() })
+    $accounts = New-Object System.Collections.ArrayList
+    foreach ($item in @(Get-Accounts)) {
+        if ($item.Key.ToLower() -ne $key.ToLower() -and $item.Username.ToLower() -ne $user.ToLower()) {
+            $null = $accounts.Add($item)
+        } else {
+            Write-Host "[INFO] Updating existing profile for '$($item.Label)' ($($item.Username))..." -ForegroundColor Yellow
+        }
     }
 
     $newIdx = $accounts.Count + 1
-    $accounts += @{
+    $null = $accounts.Add([PSCustomObject]@{
         Index       = $newIdx
         Key         = $key.ToLower()
         AliasList   = @("$newIdx", $key.ToLower(), $user.ToLower())
@@ -275,7 +288,7 @@ function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string
         Name        = $commitName
         Email       = $commitEmail
         Description = "$label account ($user)"
-    }
+    })
 
     Save-Accounts $accounts
     Write-Host ""
@@ -293,7 +306,7 @@ function Remove-Account([string]$target, [bool]$forceDelete) {
         return
     }
 
-    $accounts = Get-Accounts
+    $accounts = @(Get-Accounts)
     $clean = $target.Trim().ToLower()
     $match = $null
 
@@ -316,7 +329,12 @@ function Remove-Account([string]$target, [bool]$forceDelete) {
     }
 
     if ($proceed) {
-        $remaining = @($accounts | Where-Object { $_.Username.ToLower() -ne $match.Username.ToLower() -or $_.Key.ToLower() -ne $match.Key.ToLower() })
+        $remaining = New-Object System.Collections.ArrayList
+        foreach ($a in $accounts) {
+            if ($a.Username.ToLower() -ne $match.Username.ToLower() -and $a.Key.ToLower() -ne $match.Key.ToLower()) {
+                $null = $remaining.Add($a)
+            }
+        }
         Save-Accounts $remaining
         Write-Host ""
         Write-Host "[OK] Account '$($match.Label)' ($($match.Username)) removed successfully." -ForegroundColor Green

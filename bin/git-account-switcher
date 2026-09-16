@@ -10,8 +10,8 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && command -v powershell.e
     exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
 fi
 
-CONFIG_DIR="$HOME/.config/git-account-switcher"
-CONFIG_FILE="$CONFIG_DIR/accounts.json"
+CONFIG_FILE="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
+CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 
 show_status() {
     local active_gh

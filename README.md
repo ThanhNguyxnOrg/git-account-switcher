@@ -21,6 +21,8 @@
 - [🛠️ Account Management (`add`, `remove`, `sync`)](#️-account-management-add-remove-sync)
 - [🤖 AI-Native Setup (For Cursor, Claude, Copilot, Antigravity)](#-ai-native-setup-for-cursor-claude-copilot-antigravity)
 - [📂 Bonus: Automatic Folder Isolation (`includeIf`)](#-bonus-automatic-folder-isolation-includeif)
+- [💻 Local Development & Testing](#-local-development--testing)
+- [🤝 Contributing](#-contributing)
 - [🗑️ Uninstallation](#️-uninstallation)
 - [📄 License](#-license)
 
@@ -472,6 +474,93 @@ And inside `~/.gitconfig-work`:
 
 - When editing and committing code inside `~/work/`, Git automatically signs commits as your work identity.
 - When pushing remotely or creating pull requests, run `gswitch work` to align your GitHub CLI token!
+
+---
+
+## 💻 Local Development & Testing
+
+Want to contribute, test improvements, or run your own customized build of `git-account-switcher`?
+
+### 1. Repository Directory Structure
+```
+git-account-switcher/
+├── bin/
+│   ├── git-account-switcher.ps1   # PowerShell engine (Windows)
+│   ├── git-account-switcher       # POSIX Bash engine (macOS / Linux)
+│   ├── switch-git.ps1             # Backward-compatible PowerShell wrapper
+│   ├── switch-git.cmd             # Windows CMD wrapper
+│   └── switch-git                 # Backward-compatible Bash wrapper
+├── config/
+│   ├── accounts.example.json      # Sample generic configuration
+│   └── accounts.json              # First-time installation template
+├── tests/
+│   ├── test-all.ps1               # Automated test suite for PowerShell
+│   └── test-all.sh                # Automated test suite for POSIX Bash
+├── install.ps1                    # 1-line & local installer for Windows
+├── install.sh                     # 1-line & local installer for macOS / Linux
+├── uninstall.ps1                  # Uninstaller for Windows
+├── uninstall.sh                   # Uninstaller for macOS / Linux
+├── AGENT.md                       # AI Agent autonomous operations protocol
+├── CONTRIBUTING.md                # Contribution & developer guide
+├── LICENSE                        # MIT License
+└── README.md                      # Documentation & guides
+```
+
+### 2. Testing Locally Without Modifying Your Personal Config
+Both PowerShell and Bash implementations support the `GIT_ACCOUNT_SWITCHER_CONFIG` environment variable to sandbox configuration during development:
+
+**Windows (PowerShell):**
+```powershell
+# Point to an isolated sandbox config
+$env:GIT_ACCOUNT_SWITCHER_CONFIG = "$PWD\tests\sandbox.json"
+
+# Run your modified script directly
+.\bin\git-account-switcher.ps1 list
+.\bin\git-account-switcher.ps1 add octocat work
+.\bin\git-account-switcher.ps1 status
+
+# Reset environment variable
+Remove-Item env:GIT_ACCOUNT_SWITCHER_CONFIG
+Remove-Item .\tests\sandbox.json -ErrorAction SilentlyContinue
+```
+
+**macOS & Linux (Bash):**
+```bash
+# Point to an isolated sandbox config
+export GIT_ACCOUNT_SWITCHER_CONFIG="$PWD/tests/sandbox.json"
+
+# Run your modified script directly
+./bin/git-account-switcher list
+./bin/git-account-switcher add octocat work
+./bin/git-account-switcher status
+
+# Reset environment variable
+unset GIT_ACCOUNT_SWITCHER_CONFIG
+rm -f ./tests/sandbox.json
+```
+
+### 3. Running the Automated Test Suites
+Run the automated test runner to ensure a 100% test pass rate across syntax, commands, and sandbox integration:
+
+- **On Windows:**
+  ```powershell
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-all.ps1
+  ```
+
+- **On macOS / Linux / Git Bash:**
+  ```bash
+  bash ./tests/test-all.sh
+  ```
+
+---
+
+## 🤝 Contributing
+
+We welcome community contributions! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) guide for details on:
+- Project philosophy and cross-platform parity requirements
+- How to create sandbox tests for new features
+- Conventional commit conventions
+- Submitting Pull Requests
 
 ---
 
