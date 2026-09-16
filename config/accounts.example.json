@@ -1,32 +1,32 @@
 [
   {
     "index": 1,
-    "key": "work",
-    "aliases": ["1", "work", "office"],
-    "label": "Work Account",
-    "username": "YourWorkUsername",
-    "name": "Your Full Name",
-    "email": "12345678+YourWorkUsername@users.noreply.github.com",
-    "description": "Company projects & repositories"
+    "key": "main",
+    "aliases": ["1", "main", "personal"],
+    "label": "Personal",
+    "username": "octocat",
+    "name": "Mona Lisa Octocat",
+    "email": "583231+octocat@users.noreply.github.com",
+    "description": "Personal side projects & open source"
   },
   {
     "index": 2,
-    "key": "personal",
-    "aliases": ["2", "personal", "dev"],
-    "label": "Personal Account",
-    "username": "YourPersonalUsername",
-    "name": "Your Full Name",
-    "email": "87654321+YourPersonalUsername@users.noreply.github.com",
-    "description": "Open source & side projects"
+    "key": "work",
+    "aliases": ["2", "work", "corp"],
+    "label": "Work",
+    "username": "mona-corp",
+    "name": "Mona Octocat",
+    "email": "mona@enterprise.com",
+    "description": "Enterprise company projects"
   },
   {
     "index": 3,
-    "key": "academic",
-    "aliases": ["3", "school", "student"],
-    "label": "Academic Account",
-    "username": "YourStudentUsername",
-    "name": "Your Full Name",
-    "email": "99999999+YourStudentUsername@users.noreply.github.com",
-    "description": "University & academic work"
+    "key": "school",
+    "aliases": ["3", "school", "academic"],
+    "label": "School",
+    "username": "student-mona",
+    "name": "Mona Student",
+    "email": "mona@university.edu",
+    "description": "University assignments & research"
   }
 ]

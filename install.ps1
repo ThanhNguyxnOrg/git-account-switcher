@@ -1,12 +1,13 @@
 <#
 .SYNOPSIS
-    Installs git-account-switcher to the local user environment.
+    Installs git-account-switcher (gswitch) to the local user environment.
 .DESCRIPTION
     1. Copies executable scripts to $HOME\.local\bin
     2. Ensures $HOME\.local\bin is present in User PATH
     3. Deploys accounts configuration to $HOME\.config\git-account-switcher\accounts.json
-    4. Configures Git credential helper to use GitHub CLI
-    5. Sets up git aliases (git who, git switch-acc)
+    4. Auto-detects and syncs accounts from GitHub CLI (if available)
+    5. Configures Git credential helper to use GitHub CLI
+    6. Sets up git aliases (git who, git switch-acc)
 #>
 
 [CmdletBinding()]
@@ -18,7 +19,7 @@ $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " git-account-switcher Installer" -ForegroundColor Cyan
+Write-Host " git-account-switcher (gswitch) Installer" -ForegroundColor Cyan
 Write-Host " Fast Multi-Account GitHub & Git Identity Switcher" -ForegroundColor DarkCyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
@@ -79,28 +80,20 @@ if (-not (Test-Path $configDir)) {
 }
 
 $destConfig = Join-Path $configDir "accounts.json"
-$srcConfig = Join-Path $PSScriptRoot "config\accounts.json"
 $srcExample = Join-Path $PSScriptRoot "config\accounts.example.json"
 
 if ((-not (Test-Path $destConfig)) -or $Force) {
-    if (Test-Path $srcConfig) {
-        Copy-Item -Path $srcConfig -Destination $destConfig -Force
-        Write-Host "  [OK] Deployed accounts.json -> $destConfig" -ForegroundColor Green
+    # Check if gh has logged in accounts to auto-sync
+    $statusCheck = gh auth status 2>&1
+    if ($statusCheck -match 'Logged in to .* account') {
+        Write-Host "  Detected active GitHub CLI accounts! Running auto-discovery..." -ForegroundColor DarkCyan
+        & "$binDir\git-account-switcher.ps1" sync
     } elseif (Test-Path $srcExample) {
         Copy-Item -Path $srcExample -Destination $destConfig -Force
         Write-Host "  [OK] Deployed template accounts.json -> $destConfig" -ForegroundColor Green
     }
 } else {
-    Write-Host "  [INFO] Configuration exists at $destConfig (skipping overwrite, use -Force to replace)." -ForegroundColor DarkGray
-}
-
-# Also sync to switch-git config dir for backwards compatibility
-$legacyConfigDir = "$HOME\.config\switch-git"
-if (-not (Test-Path $legacyConfigDir)) {
-    New-Item -ItemType Directory -Path $legacyConfigDir -Force | Out-Null
-}
-if (Test-Path $destConfig) {
-    Copy-Item -Path $destConfig -Destination (Join-Path $legacyConfigDir "accounts.json") -Force
+    Write-Host "  [INFO] Existing configuration preserved at $destConfig." -ForegroundColor Green
 }
 
 # 4. Configure Git credential helper for GitHub CLI
@@ -127,11 +120,10 @@ Write-Host "============================================================" -Foreg
 Write-Host " Installation Complete!" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host "You can now use any of these commands from any terminal:" -ForegroundColor Cyan
-Write-Host "  git-account-switcher <account>   # Full command (e.g. git-account-switcher school)" -ForegroundColor White
-Write-Host "  gswitch <account>                # Short alias (e.g. gswitch real)" -ForegroundColor White
-Write-Host "  switch-git <account>             # Alternative alias" -ForegroundColor White
-Write-Host "  gswitch                          # Interactive account selector" -ForegroundColor White
-Write-Host "  gswitch status                   # View currently active identity" -ForegroundColor White
-Write-Host "  git who                          # Git alias for status" -ForegroundColor White
-Write-Host "  git switch-acc <acc>             # Git alias for switching" -ForegroundColor White
+Write-Host "  gswitch <account>                # Fast switch (e.g. gswitch main, gswitch work)" -ForegroundColor White
+Write-Host "  gswitch -l <account>             # Switch locally for current repository only" -ForegroundColor White
+Write-Host "  gswitch                          # Interactive account menu" -ForegroundColor White
+Write-Host "  gswitch sync                     # Auto-import all logged in GitHub CLI accounts" -ForegroundColor White
+Write-Host "  gswitch list                     # View all configured accounts" -ForegroundColor White
+Write-Host "  gswitch status                   # View current active identity (or: git who)" -ForegroundColor White
 Write-Host ""

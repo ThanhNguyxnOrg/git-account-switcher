@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# git-account-switcher Installer for macOS and Linux
+# git-account-switcher (gswitch) Installer for macOS and Linux
 # ==============================================================================
 set -e
 
 echo ""
 echo "============================================================"
-echo " git-account-switcher Installer (macOS & Linux)"
+echo " git-account-switcher (gswitch) Installer (macOS & Linux)"
 echo " Fast Multi-Account GitHub & Git Identity Switcher"
 echo "============================================================"
 echo ""
@@ -51,15 +51,15 @@ CONFIG_DIR="$HOME/.config/git-account-switcher"
 mkdir -p "$CONFIG_DIR"
 
 if [[ ! -f "$CONFIG_DIR/accounts.json" ]]; then
-    if [[ -f "$SCRIPT_DIR/config/accounts.json" ]]; then
-        cp "$SCRIPT_DIR/config/accounts.json" "$CONFIG_DIR/accounts.json"
-        echo "  [OK] Deployed accounts.json -> $CONFIG_DIR/accounts.json"
+    if gh auth status 2>&1 | grep -q 'Logged in to .* account'; then
+        echo "  Detected active GitHub CLI accounts! Running auto-discovery..."
+        "$BIN_DIR/gswitch" sync || true
     elif [[ -f "$SCRIPT_DIR/config/accounts.example.json" ]]; then
         cp "$SCRIPT_DIR/config/accounts.example.json" "$CONFIG_DIR/accounts.json"
         echo "  [OK] Deployed template accounts.json -> $CONFIG_DIR/accounts.json"
     fi
 else
-    echo "  [INFO] Existing configuration found at $CONFIG_DIR/accounts.json"
+    echo "  [INFO] Existing configuration preserved at $CONFIG_DIR/accounts.json"
 fi
 
 # 4. Configure Git credential helper for GitHub CLI
@@ -81,10 +81,9 @@ echo "============================================================"
 echo " Installation Complete!"
 echo "============================================================"
 echo "Run from any terminal:"
-echo "  git-account-switcher <account>   # Full command"
-echo "  gswitch <account>                # Short alias"
-echo "  gswitch                          # Interactive selector"
-echo "  gswitch status                   # Check current identity"
-echo "  git who                          # Git alias for status"
-echo "  git switch-acc <acc>             # Git alias for switching"
+echo "  gswitch <account>       # Fast switch"
+echo "  gswitch -l <account>    # Local repo switch"
+echo "  gswitch sync            # Auto-import logged-in accounts"
+echo "  gswitch list            # View configured accounts"
+echo "  gswitch status          # Check current identity"
 echo ""

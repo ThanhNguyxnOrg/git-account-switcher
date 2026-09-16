@@ -1,50 +1,134 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# git-account-switcher - Cross-platform Git & GitHub Account Switcher
-# Native Bash script for macOS, Linux, and Windows (Git Bash/WSL)
+# git-account-switcher (gswitch) - Fast Multi-Account GitHub & Git Switcher
+# Native POSIX Bash for macOS, Linux, and Windows (Git Bash/WSL)
 # ==============================================================================
 
-# If running in Windows Git Bash and powershell.exe is available, pass through to powershell script
+# If running in Windows Git Bash and powershell.exe is available, delegate to powershell
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && command -v powershell.exe >/dev/null 2>&1; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
 fi
 
-TARGET="$1"
-
-# Find configuration file
-CONFIG_PATHS=(
-    "$HOME/.config/git-account-switcher/accounts.json"
-    "$HOME/.config/switch-git/accounts.json"
-    "$(dirname "$0")/../config/accounts.json"
-    "$(dirname "$0")/accounts.json"
-)
-
-CONFIG_FILE=""
-for cp in "${CONFIG_PATHS[@]}"; do
-    if [[ -f "$cp" ]]; then
-        CONFIG_FILE="$cp"
-        break
-    fi
-done
+CONFIG_DIR="$HOME/.config/git-account-switcher"
+CONFIG_FILE="$CONFIG_DIR/accounts.json"
 
 show_status() {
-    local current_gh
-    current_gh=$(gh api user --jq '.login' 2>/dev/null || echo "(not logged in / error)")
-    local current_name
-    current_name=$(git config --global user.name 2>/dev/null || echo "(not set)")
-    local current_email
-    current_email=$(git config --global user.email 2>/dev/null || echo "(not set)")
+    local active_gh
+    active_gh=$(gh api user --jq '.login' 2>/dev/null || echo "(none / not logged in)")
+    local global_name
+    global_name=$(git config --global user.name 2>/dev/null || echo "(not set)")
+    local global_email
+    global_email=$(git config --global user.email 2>/dev/null || echo "(not set)")
+
+    local is_repo
+    is_repo=$(git rev-parse --is-inside-work-tree 2>/dev/null || echo "false")
+    local local_name=""
+    local local_email=""
+    if [[ "$is_repo" == "true" ]]; then
+        local_name=$(git config --local user.name 2>/dev/null || true)
+        local_email=$(git config --local user.email 2>/dev/null || true)
+    fi
 
     echo ""
     echo "============================================================"
     echo " CURRENT GITHUB & GIT IDENTITY"
     echo "============================================================"
-    echo -e " GitHub CLI Active : \033[0;32m$current_gh\033[0m"
-    echo -e " Git Global Name   : \033[0;32m$current_name\033[0m"
-    echo -e " Git Global Email  : \033[0;32m$current_email\033[0m"
+    echo -e " GitHub CLI Active : \033[0;32m$active_gh\033[0m"
+    echo -e " Git Global Name   : \033[0;32m$global_name\033[0m"
+    echo -e " Git Global Email  : \033[0;32m$global_email\033[0m"
+
+    if [[ "$is_repo" == "true" && (-n "$local_name" || -n "$local_email") ]]; then
+        echo " ------------------------------------------------------------"
+        echo -e " \033[1;33m[Repo Local Override detected in current directory]\033[0m"
+        echo -e " Git Local Name    : \033[1;33m$local_name\033[0m"
+        echo -e " Git Local Email   : \033[1;33m$local_email\033[0m"
+    fi
     echo "============================================================"
     echo ""
+}
+
+show_list() {
+    local active_gh
+    active_gh=$(gh api user --jq '.login' 2>/dev/null || echo "")
+
+    echo ""
+    echo -e "\033[1;33mConfigured Account Profiles:\033[0m"
+    echo "================================================================================"
+
+    if [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
+        python3 -c "
+import json, sys
+active = sys.argv[1].lower()
+with open('$CONFIG_FILE') as f:
+    accounts = json.load(f)
+for a in accounts:
+    is_act = (a.get('username', '').lower() == active)
+    marker = '> ' if is_act else '  '
+    status = '* ACTIVE' if is_act else f\"(key: {a.get('key','')})\"
+    color = '\033[0;32m' if is_act else ''
+    reset = '\033[0m' if is_act else ''
+    print(f\"{color}{marker}[{a.get('index')}] {a.get('label',''):<18} {a.get('username',''):<18} {a.get('email',''):<40} {status}{reset}\")
+" "$active_gh"
+    elif [[ -f "$CONFIG_FILE" ]] && command -v jq >/dev/null 2>&1; then
+        jq -r '.[] | "   [\(.index)] \(.label) (\(.username)) - \(.email)"' "$CONFIG_FILE"
+    else
+        echo "No accounts configuration found at $CONFIG_FILE."
+    fi
+    echo "================================================================================"
+    echo ""
+}
+
+sync_from_gh() {
+    echo ""
+    echo -e "\033[0;36mScanning GitHub CLI for authenticated accounts...\033[0m"
+    
+    local accounts=()
+    while IFS= read -r line; do
+        if [[ $line =~ Logged\ in\ to.*\ account\ ([a-zA-Z0-9_-]+) ]]; then
+            accounts+=("${BASH_REMATCH[1]}")
+        fi
+    done < <(gh auth status 2>&1 || true)
+
+    if [[ ${#accounts[@]} -eq 0 ]]; then
+        echo -e "\033[1;33m[WARNING] No accounts found in 'gh auth status'. Please login via 'gh auth login'.\033[0m"
+        return 1
+    fi
+
+    echo -e "\033[0;32mFound ${#accounts[@]} account(s): ${accounts[*]}\033[0m"
+    mkdir -p "$CONFIG_DIR"
+
+    python3 -c "
+import json, sys, subprocess
+
+accounts = sys.argv[1:]
+result = []
+for idx, user in enumerate(accounts, 1):
+    try:
+        out = subprocess.check_output(['gh', 'api', f'users/{user}'], stderr=subprocess.DEVNULL)
+        info = json.loads(out)
+        uid = info.get('id', 0)
+        uname = info.get('name') or user
+    except Exception:
+        uid = 0
+        uname = user
+
+    result.append({
+        'index': idx,
+        'key': user.lower(),
+        'aliases': [str(idx), user.lower()],
+        'label': user,
+        'username': user,
+        'name': uname,
+        'email': f'{uid}+{user}@users.noreply.github.com',
+        'description': f'GitHub account {user}'
+    })
+
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(result, f, indent=2)
+print(f'[OK] Successfully synced {len(result)} accounts to $CONFIG_FILE!')
+" "${accounts[@]}"
+    show_list
 }
 
 switch_account() {
@@ -52,116 +136,110 @@ switch_account() {
     local username="$2"
     local name="$3"
     local email="$4"
+    local is_local="$5"
 
     echo ""
-    echo ">> Switching to account: [$label] ($username)..."
+    echo -e "\033[1;33m>> Switching to account: [$label] ($username)...\033[0m"
+
     if ! gh auth switch -u "$username"; then
         echo -e "\033[0;31m[ERROR] Failed to switch GitHub CLI to $username\033[0m"
         exit 1
     fi
 
-    git config --global user.name "$name"
-    git config --global user.email "$email"
-
-    echo -e "\033[0;32m[OK] GitHub CLI switched to : $username\033[0m"
-    echo -e "\033[0;32m[OK] Git user.name set to   : $name\033[0m"
-    echo -e "\033[0;32m[OK] Git user.email set to  : $email\033[0m"
-    echo ""
-    echo -e "\033[0;36m=> Ready to commit & push as $label!\033[0m"
+    if [[ "$is_local" == "true" ]]; then
+        if [[ $(git rev-parse --is-inside-work-tree 2>/dev/null) != "true" ]]; then
+            echo -e "\033[0;31m[ERROR] Current directory is not a Git repository.\033[0m"
+            exit 1
+        fi
+        git config --local user.name "$name"
+        git config --local user.email "$email"
+        echo -e "\033[0;32m[OK] GitHub CLI switched to : $username\033[0m"
+        echo -e "\033[0;32m[OK] Git user.name (LOCAL)  : $name\033[0m"
+        echo -e "\033[0;32m[OK] Git user.email (LOCAL) : $email\033[0m"
+        echo ""
+        echo -e "\033[0;36m=> Applied locally to this repository only!\033[0m"
+    else
+        git config --global user.name "$name"
+        git config --global user.email "$email"
+        echo -e "\033[0;32m[OK] GitHub CLI switched to : $username\033[0m"
+        echo -e "\033[0;32m[OK] Git user.name (GLOBAL) : $name\033[0m"
+        echo -e "\033[0;32m[OK] Git user.email (GLOBAL): $email\033[0m"
+        echo ""
+        echo -e "\033[0;36m=> Ready to commit & push as $label!\033[0m"
+    fi
     echo ""
 }
 
-# Handle status check
-if [[ "$TARGET" == "status" || "$TARGET" == "who" || "$TARGET" == "current" || "$TARGET" == "-s" ]]; then
-    show_status
-    exit 0
-fi
+# Process flags
+APPLY_LOCAL="false"
+TARGET=""
 
-# Parse account via python3 or jq
-get_account_data() {
-    local query="$1"
-    if [[ -f "$CONFIG_FILE" ]]; then
-        if command -v jq >/dev/null 2>&1; then
-            jq -r --arg q "$query" '
-                .[] | select(
-                    (.index | tostring == $q) or
-                    (.key | ascii_downcase == ($q | ascii_downcase)) or
-                    (.username | ascii_downcase == ($q | ascii_downcase)) or
-                    (.aliases[]? | ascii_downcase == ($q | ascii_downcase))
-                ) | "\(.label)\t\(.username)\t\(.name)\t\(.email)"
-            ' "$CONFIG_FILE" | head -n 1
-            return
-        elif command -v python3 >/dev/null 2>&1; then
-            python3 -c "
-import json, sys
-q = sys.argv[1].lower()
-with open('$CONFIG_FILE') as f:
-    data = json.load(f)
-for item in data:
-    aliases = [a.lower() for a in item.get('aliases', [])]
-    if str(item.get('index')) == q or item.get('key', '').lower() == q or item.get('username', '').lower() == q or q in aliases:
-        print(f\"{item['label']}\t{item['username']}\t{item['name']}\t{item['email']}\")
-        break
-" "$query"
-            return
-        fi
-    fi
-
-    # Fallback built-in matching if no JSON parser is found
-    case "${query,,}" in
-        1|school|thanhnguyn)
-            echo -e "School\tThanhNguyn\tThanhNguyn\t253024274+ThanhNguyn@users.noreply.github.com"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -l|--local)
+            APPLY_LOCAL="true"
+            shift
             ;;
-        2|real|realthanhnguyxn)
-            echo -e "RealThanhNguyxn\tRealThanhNguyxn\tRealThanhNguyxn\t274720769+RealThanhNguyxn@users.noreply.github.com"
+        -g|--global)
+            APPLY_LOCAL="false"
+            shift
             ;;
-        3|07|thanhnguyxn07)
-            echo -e "ThanhNguyxn07\tThanhNguyxn07\tThanhNguyxn07\t272073999+ThanhNguyxn07@users.noreply.github.com"
+        status|who|current|-s)
+            show_status
+            exit 0
+            ;;
+        list|ls)
+            show_list
+            exit 0
+            ;;
+        sync|import)
+            sync_from_gh
+            exit 0
+            ;;
+        help|-h|--help)
+            echo "git-account-switcher (gswitch) ⚡"
+            echo "Usage: gswitch [account] [-l|--local] | status | list | sync"
+            exit 0
+            ;;
+        *)
+            TARGET="$1"
+            shift
             ;;
     esac
-}
+done
 
-list_accounts() {
-    if [[ -f "$CONFIG_FILE" ]] && command -v jq >/dev/null 2>&1; then
-        jq -r '.[] | " [\(.index)] \(.label | rpad(20)) \(.email | rpad(50)) (Command: gswitch \(.key))"' "$CONFIG_FILE" 2>/dev/null || true
-    elif [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 -c "
-import json
-with open('$CONFIG_FILE') as f:
-    data = json.load(f)
-for item in data:
-    print(f\" [{item['index']}] {item['label']:<20} {item['email']:<52} (Command: gswitch {item['key']})\")
-"
-    else
-        echo " [1] School               253024274+ThanhNguyn@users.noreply.github.com        (Command: gswitch school)"
-        echo " [2] RealThanhNguyxn      274720769+RealThanhNguyxn@users.noreply.github.com   (Command: gswitch real)"
-        echo " [3] ThanhNguyxn07        272073999+ThanhNguyxn07@users.noreply.github.com     (Command: gswitch 07)"
-    fi
-}
-
-SELECTED=""
-if [[ -n "$TARGET" ]]; then
-    SELECTED=$(get_account_data "$TARGET")
-fi
-
-if [[ -z "$SELECTED" ]]; then
+if [[ -z "$TARGET" ]]; then
     show_status
-    echo -e "\033[1;33mAvailable accounts:\033[0m"
-    list_accounts
-    echo ""
-    read -r -p "Select account or press Enter to cancel: " CHOICE
-    if [[ -n "$CHOICE" ]]; then
-        SELECTED=$(get_account_data "$CHOICE")
+    show_list
+    read -r -p "Select account, 's' to sync, or Enter to cancel: " CHOICE
+    if [[ "$CHOICE" =~ ^[sS]$ ]]; then
+        sync_from_gh
+        exit 0
+    elif [[ -n "$CHOICE" ]]; then
+        TARGET="$CHOICE"
     else
         echo "Cancelled."
         exit 0
     fi
 fi
 
+# Find account in JSON
+SELECTED=$(python3 -c "
+import json, sys
+q = sys.argv[1].lower()
+with open('$CONFIG_FILE') as f:
+    data = json.load(f)
+for a in data:
+    aliases = [str(x).lower() for x in a.get('aliases', [])]
+    if str(a.get('index')) == q or a.get('key','').lower() == q or a.get('username','').lower() == q or q in aliases:
+        print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\")
+        break
+" "$TARGET" 2>/dev/null || true)
+
 if [[ -n "$SELECTED" ]]; then
     IFS=$'\t' read -r S_LABEL S_USER S_NAME S_EMAIL <<< "$SELECTED"
-    switch_account "$S_LABEL" "$S_USER" "$S_NAME" "$S_EMAIL"
+    switch_account "$S_LABEL" "$S_USER" "$S_NAME" "$S_EMAIL" "$APPLY_LOCAL"
 else
-    echo -e "\033[0;31mAccount not found for '$TARGET'.\033[0m"
+    echo -e "\033[0;31m[ERROR] Account '$TARGET' not found. Run 'gswitch list' or 'gswitch sync'.\033[0m"
     exit 1
 fi

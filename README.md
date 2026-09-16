@@ -26,7 +26,7 @@ Developers managing multiple GitHub accounts (e.g., **Personal**, **Work**, and 
 
 `git-account-switcher` unifies both layers into an atomic, instantaneous switch:
 - **Toggles GitHub CLI (`gh auth switch`):** Grants instant HTTPS push/pull permissions and repository creation capabilities under the target account.
-- **Toggles Git Identity (`git config --global`):** Updates `user.name` and `user.email` (using GitHub's privacy-protected `noreply` email).
+- **Toggles Git Identity (`git config`):** Updates `user.name` and `user.email` (using GitHub's privacy-protected `noreply` email). Supports both **global** and **repository-local** scopes.
 - **Zero SSH required:** Uses GitHub CLI as Git's native HTTPS credential helper (`git-credential`).
 
 ```
@@ -37,7 +37,7 @@ Developers managing multiple GitHub accounts (e.g., **Personal**, **Work**, and 
                      ┌───────────────────────┴───────────────────────┐
                      ▼                                               ▼
          [GitHub Server Token]                             [Local Git Identity]
-           gh auth switch -u                               git config --global
+           gh auth switch -u                           git config (--global / --local)
       Push/Pull HTTPS Permissions                     user.name & user.email (noreply)
 ```
 
@@ -46,38 +46,44 @@ Developers managing multiple GitHub accounts (e.g., **Personal**, **Work**, and 
 ## 🚀 Features
 
 - ⚡ **Single Command Switch:** Switch active token and git author in under 1 second.
-- 🔒 **Privacy First:** Configured out-of-the-box with GitHub's private noreply emails (`<id>+<username>@users.noreply.github.com`).
+- 🔄 **Auto-Discovery (`gswitch sync`):** Automatically scans your authenticated GitHub CLI accounts, fetches user IDs, and generates private noreply emails with zero manual setup.
+- 🎯 **Repository-Local Switching (`-l` / `--local`):** Apply an identity solely to the current repository without modifying your system-wide global Git identity.
+- 🔒 **Privacy First:** Out-of-the-box support for GitHub's private noreply emails (`<id>+<username>@users.noreply.github.com`).
 - 🌐 **100% Cross-Platform:** Native support for Windows (PowerShell/CMD), macOS, and Linux (Bash/Zsh).
-- ⌨️ **Multiple CLI Commands:** Use full command `git-account-switcher`, quick alias `gswitch`, or legacy `switch-git`.
+- ⌨️ **Ergonomic CLI:** Use the short command `gswitch`, the full command `git-account-switcher`, or legacy alias `switch-git`.
 - 🎨 **Interactive Menu:** Run `gswitch` without arguments to launch a clean terminal selector.
 - 🛠️ **Native Git Aliases:** Integrated seamlessly into `git who` and `git switch-acc`.
 - 📁 **Folder Isolation Compatible:** Fully interoperable with Git's native `includeIf` conditional configs.
-- ⚙️ **JSON Profile Management:** Profiles live in clean, portable JSON configurations (`~/.config/git-account-switcher/accounts.json`).
+- ⚙️ **Portable JSON Profiles:** Profiles live in clean, human-readable JSON configurations (`~/.config/git-account-switcher/accounts.json`).
 
 ---
 
 ## 📦 Installation
 
-### Clone the Repository
+### 1-Line Quick Install (No git clone required)
+
+#### Windows (PowerShell):
+```powershell
+irm https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/install.ps1 | iex
+```
+
+#### macOS & Linux (Bash / Zsh):
+```bash
+curl -fsSL https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/install.sh | bash
+```
+
+---
+
+### Manual Clone Installation
 
 ```bash
 git clone https://github.com/ThanhNguyxnOrg/git-account-switcher.git
 cd git-account-switcher
-```
 
-### Windows (PowerShell)
-
-Run PowerShell in the repository root:
-
-```powershell
+# On Windows:
 .\install.ps1
-```
 
-### macOS & Linux (Bash / Zsh)
-
-Run in terminal:
-
-```bash
+# On macOS / Linux:
 chmod +x install.sh
 ./install.sh
 ```
@@ -85,7 +91,7 @@ chmod +x install.sh
 The installer will:
 1. Copy executable scripts to your local user binary path (`~/.local/bin`).
 2. Ensure `~/.local/bin` is in your environment `PATH`.
-3. Deploy your account profile configuration to `~/.config/git-account-switcher/accounts.json`.
+3. Auto-discover and populate your logged-in GitHub accounts via `gswitch sync`.
 4. Configure Git's credential helper to use GitHub CLI (`gh auth git-credential`).
 5. Register global Git aliases: `git who` and `git switch-acc`.
 
@@ -93,40 +99,63 @@ The installer will:
 
 ## 🎮 Usage
 
-### 1. Fast Switch via Keywords or Index
+### 1. Fast Global Switch
 
-You can use either `git-account-switcher` or the short alias `gswitch`:
+You can switch using account keys, usernames, or index numbers:
 
 ```bash
+gswitch main          # Switch to Personal / Main account
+gswitch work          # Switch to Work account
 gswitch school        # Switch to Academic / School account
-gswitch real          # Switch to Primary / Personal account
-gswitch 07            # Switch to Secondary / Work account
+
+# Or by index number:
+gswitch 1
+gswitch 2
+gswitch 3
 ```
 
-*(You can also use index numbers: `gswitch 1`, `gswitch 2`, `gswitch 3`)*
+### 2. Repository-Local Switch (`-l` / `--local`)
 
-### 2. Interactive Selection Menu
+Need to work on a specific repository under your work account without altering your machine's global Git profile?
 
-Simply run `gswitch` (or `git-account-switcher`) with no arguments:
+```bash
+cd ~/path/to/enterprise-repo
+gswitch -l work
+```
+*This sets `user.name` and `user.email` locally in `.git/config` for this repository only, while switching your active GitHub CLI token!*
+
+### 3. Auto-Discover & Sync Accounts
+
+Have accounts already logged into GitHub CLI (`gh auth login`)? Import them automatically in 1 second:
+
+```bash
+gswitch sync
+```
+
+`gswitch` will inspect `gh auth status`, query GitHub's user API, and configure all IDs and private noreply emails automatically.
+
+### 4. Interactive Selection Menu
+
+Simply run `gswitch` with no arguments:
 
 ```text
 ============================================================
  CURRENT GITHUB & GIT IDENTITY
 ============================================================
- GitHub CLI Active : ThanhNguyn
- Git Global Name   : ThanhNguyn
- Git Global Email  : 253024274+ThanhNguyn@users.noreply.github.com
+ GitHub CLI Active : octocat
+ Git Global Name   : Mona Lisa Octocat
+ Git Global Email  : 583231+octocat@users.noreply.github.com
 ============================================================
 
 Available accounts:
- [1] School               253024274+ThanhNguyn@users.noreply.github.com        (Command: gswitch school)
- [2] RealThanhNguyxn      274720769+RealThanhNguyxn@users.noreply.github.com   (Command: gswitch real)
- [3] ThanhNguyxn07        272073999+ThanhNguyxn07@users.noreply.github.com     (Command: gswitch 07)
+ [1] Personal           583231+octocat@users.noreply.github.com        (key: main)
+ [2] Work               mona@enterprise.com                            (key: work)
+ [3] School             mona@university.edu                            (key: school)
 
-Select account [1-3] or press Enter to cancel: 
+Select account [1-3], 's' to sync, or Enter to cancel: 
 ```
 
-### 3. Check Current Identity
+### 5. Check Current Identity
 
 ```bash
 gswitch status
@@ -134,17 +163,16 @@ gswitch status
 git who
 ```
 
-### 4. Git Native Aliases
+### 6. List All Configured Profiles
 
 ```bash
-git switch-acc real
-git switch-acc school
-git who
+gswitch list
+# (shows which account is currently * ACTIVE with a green indicator)
 ```
 
 ---
 
-## 🔧 Managing Account Profiles (`accounts.json`)
+## 🔧 Profile Configuration (`accounts.json`)
 
 Account profiles are stored in:
 ```
@@ -157,59 +185,58 @@ Account profiles are stored in:
 [
   {
     "index": 1,
-    "key": "school",
-    "aliases": ["1", "school", "thanhnguyn"],
-    "label": "School",
-    "username": "ThanhNguyn",
-    "name": "ThanhNguyn",
-    "email": "253024274+ThanhNguyn@users.noreply.github.com",
-    "description": "Academic / University"
+    "key": "main",
+    "aliases": ["1", "main", "personal"],
+    "label": "Personal",
+    "username": "octocat",
+    "name": "Mona Lisa Octocat",
+    "email": "583231+octocat@users.noreply.github.com",
+    "description": "Personal side projects & open source"
   },
   {
     "index": 2,
-    "key": "real",
-    "aliases": ["2", "real", "realthanhnguyxn"],
-    "label": "RealThanhNguyxn",
-    "username": "RealThanhNguyxn",
-    "name": "RealThanhNguyxn",
-    "email": "274720769+RealThanhNguyxn@users.noreply.github.com",
-    "description": "Personal / Primary"
+    "key": "work",
+    "aliases": ["2", "work", "corp"],
+    "label": "Work",
+    "username": "mona-corp",
+    "name": "Mona Octocat",
+    "email": "mona@enterprise.com",
+    "description": "Enterprise company projects"
+  },
+  {
+    "index": 3,
+    "key": "school",
+    "aliases": ["3", "school", "academic"],
+    "label": "School",
+    "username": "student-mona",
+    "name": "Mona Student",
+    "email": "mona@university.edu",
+    "description": "University assignments & research"
   }
 ]
 ```
-
-### Finding your GitHub Noreply Email:
-1. Switch to your desired account: `gh auth switch -u <username>`
-2. Query your GitHub ID via CLI:
-   ```bash
-   gh api user --jq "{id: .id, login: .login}"
-   ```
-3. Your private noreply email is:
-   ```
-   <id>+<login>@users.noreply.github.com
-   ```
 
 ---
 
 ## 📂 Bonus: Automatic Folder Isolation (`includeIf`)
 
-If you maintain specific directories dedicated to a specific account (e.g., `D:/University/` for school projects), you can leverage Git's native `includeIf` in `~/.gitconfig`:
+If you maintain specific directories dedicated to a specific account (e.g., `~/University/` for school projects), you can pair `gswitch` with Git's native `includeIf` in `~/.gitconfig`:
 
 ```gitconfig
-[includeIf "gitdir/i:D:/University/"]
-    path = C:/Users/YourUser/.gitconfig-school
+[includeIf "gitdir:~/University/"]
+    path = ~/.gitconfig-school
 ```
 
-And inside `C:/Users/YourUser/.gitconfig-school`:
+And inside `~/.gitconfig-school`:
 ```gitconfig
 [user]
-    name = YourSchoolName
-    email = <school-id>+YourSchoolName@users.noreply.github.com
+    name = Student Name
+    email = <school-id>+student@users.noreply.github.com
 ```
 
 With this setup:
-- Any commit made inside `D:/University/` is **permanently guaranteed** to commit under your school identity.
-- When creating repos or pushing remotely, simply run `gswitch school` to align your GitHub CLI token!
+- Any commit made inside `~/University/` is **permanently guaranteed** to commit under your school identity.
+- When creating repos or pushing remotely, simply run `gswitch school` to align your GitHub CLI push token!
 
 ---
 
@@ -218,14 +245,14 @@ With this setup:
 ### Windows
 ```powershell
 .\uninstall.ps1
-# To purge config as well:
+# To purge config directory as well:
 .\uninstall.ps1 -PurgeConfig
 ```
 
 ### macOS & Linux
 ```bash
 ./uninstall.sh
-# To purge config as well:
+# To purge config directory as well:
 ./uninstall.sh --purge
 ```
 
