@@ -1,0 +1,32 @@
+[
+  {
+    "index": 1,
+    "key": "school",
+    "aliases": ["1", "school", "thanhnguyn"],
+    "label": "School",
+    "username": "ThanhNguyn",
+    "name": "ThanhNguyn",
+    "email": "253024274+ThanhNguyn@users.noreply.github.com",
+    "description": "School / Primary"
+  },
+  {
+    "index": 2,
+    "key": "real",
+    "aliases": ["2", "real", "realthanhnguyxn"],
+    "label": "RealThanhNguyxn",
+    "username": "RealThanhNguyxn",
+    "name": "RealThanhNguyxn",
+    "email": "274720769+RealThanhNguyxn@users.noreply.github.com",
+    "description": "Personal / Primary"
+  },
+  {
+    "index": 3,
+    "key": "07",
+    "aliases": ["3", "07", "thanhnguyxn07"],
+    "label": "ThanhNguyxn07",
+    "username": "ThanhNguyxn07",
+    "name": "ThanhNguyxn07",
+    "email": "272073999+ThanhNguyxn07@users.noreply.github.com",
+    "description": "Secondary / Work"
+  }
+]

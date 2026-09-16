@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# switch-git Unix/Git Bash wrapper
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_DIR/switch-git.ps1" "$@"
+elif command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -File "$SCRIPT_DIR/switch-git.ps1" "$@"
+else
+    echo "Error: PowerShell (powershell.exe or pwsh) is required to run switch-git." >&2
+    exit 1
+fi

@@ -1,0 +1,32 @@
+[
+  {
+    "index": 1,
+    "key": "work",
+    "aliases": ["1", "work", "office"],
+    "label": "Work Account",
+    "username": "YourWorkUsername",
+    "name": "Your Full Name",
+    "email": "12345678+YourWorkUsername@users.noreply.github.com",
+    "description": "Company projects & repositories"
+  },
+  {
+    "index": 2,
+    "key": "personal",
+    "aliases": ["2", "personal", "dev"],
+    "label": "Personal Account",
+    "username": "YourPersonalUsername",
+    "name": "Your Full Name",
+    "email": "87654321+YourPersonalUsername@users.noreply.github.com",
+    "description": "Open source & side projects"
+  },
+  {
+    "index": 3,
+    "key": "academic",
+    "aliases": ["3", "school", "student"],
+    "label": "Academic Account",
+    "username": "YourStudentUsername",
+    "name": "Your Full Name",
+    "email": "99999999+YourStudentUsername@users.noreply.github.com",
+    "description": "University & academic work"
+  }
+]
