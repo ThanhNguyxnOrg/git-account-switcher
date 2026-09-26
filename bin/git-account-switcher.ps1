@@ -48,6 +48,7 @@ function Get-Accounts {
                 $json = $raw | ConvertFrom-Json
                 $idx = 1
                 foreach ($item in $json) {
+                    $sKey = if ($item.signingkey) { [string]$item.signingkey } elseif ($item.signingKey) { [string]$item.signingKey } else { $null }
                     $null = $list.Add([PSCustomObject]@{
                         Index       = $idx
                         Key         = [string]$item.key
@@ -57,6 +58,7 @@ function Get-Accounts {
                         Name        = [string]$item.name
                         Email       = [string]$item.email
                         Description = [string]$item.description
+                        SigningKey  = $sKey
                     })
                     $idx++
                 }
@@ -75,16 +77,38 @@ function Save-Accounts($accountsList) {
     $export = @()
     $idx = 1
     foreach ($a in @($accountsList)) {
-        $export += [PSCustomObject]@{
+        $cleanedAliases = New-Object System.Collections.Generic.List[string]
+        $null = $cleanedAliases.Add("$idx")
+        if ($a.AliasList) {
+            foreach ($al in $a.AliasList) {
+                $alStr = [string]$al
+                if ($alStr -notmatch '^\d+$' -and -not $cleanedAliases.Contains($alStr.ToLower())) {
+                    $null = $cleanedAliases.Add($alStr.ToLower())
+                }
+            }
+        }
+        if ($a.Key -and -not $cleanedAliases.Contains($a.Key.ToLower())) {
+            $null = $cleanedAliases.Add($a.Key.ToLower())
+        }
+        if ($a.Username -and -not $cleanedAliases.Contains($a.Username.ToLower())) {
+            $null = $cleanedAliases.Add($a.Username.ToLower())
+        }
+
+        $itemObj = [ordered]@{
             index       = $idx
             key         = [string]$a.Key
-            aliases     = [string[]]$a.AliasList
+            aliases     = @($cleanedAliases)
             label       = [string]$a.Label
             username    = [string]$a.Username
             name        = [string]$a.Name
             email       = [string]$a.Email
             description = [string]$a.Description
         }
+        $sKey = if ($a.SigningKey) { $a.SigningKey } elseif ($a.signingkey) { $a.signingkey } else { $null }
+        if ($sKey) {
+            $itemObj["signingkey"] = [string]$sKey
+        }
+        $export += [PSCustomObject]$itemObj
         $idx++
     }
 
@@ -100,11 +124,20 @@ function Save-Accounts($accountsList) {
 
 function Get-ActiveGhUser {
     try {
-        $u = gh api user --jq "{login: .login, name: .name}" 2>$null | ConvertFrom-Json
-        return $u.login
-    } catch {
-        return "(none / not logged in)"
-    }
+        $statusOut = gh auth status --active 2>&1
+        foreach ($line in $statusOut) {
+            if ($line -match 'Logged in to .* account ([a-zA-Z0-9_-]+)') {
+                return $matches[1]
+            }
+        }
+    } catch {}
+
+    try {
+        $u = gh api user --jq ".login" 2>$null
+        if ($u -and $u.Trim()) { return $u.Trim() }
+    } catch {}
+
+    return "(none / not logged in)"
 }
 
 function Show-Status {
@@ -130,6 +163,11 @@ function Show-Status {
     
     $effectiveName  = git config user.name 2>$null
     $effectiveEmail = git config user.email 2>$null
+    $effectiveSign  = git config user.signingkey 2>$null
+
+    if ($effectiveSign) {
+        Write-Host " Git Signing Key   : " -NoNewline; Write-Host "$effectiveSign" -ForegroundColor Green
+    }
 
     if ($isRepo -and ($localName -or $localEmail)) {
         Write-Host " ------------------------------------------------------------" -ForegroundColor DarkGray
@@ -141,6 +179,20 @@ function Show-Status {
         Write-Host " [Folder includeIf Binding Active in this directory]" -ForegroundColor Yellow
         Write-Host " Effective Name    : " -NoNewline; Write-Host "$effectiveName" -ForegroundColor Yellow
         Write-Host " Effective Email   : " -NoNewline; Write-Host "$effectiveEmail" -ForegroundColor Yellow
+    }
+
+    if ($isRepo) {
+        $remoteUrl = git config --get remote.origin.url 2>$null
+        if ($remoteUrl) {
+            Write-Host " ------------------------------------------------------------" -ForegroundColor DarkGray
+            Write-Host " Remote Origin     : " -NoNewline; Write-Host "$remoteUrl" -ForegroundColor Gray
+            if ($remoteUrl -match '^git@github\.com:' -or $remoteUrl -match '^ssh://') {
+                Write-Host " [WARNING] Remote uses SSH ($remoteUrl)." -ForegroundColor Yellow
+                Write-Host "           Git credential helper applies to HTTPS URLs." -ForegroundColor DarkYellow
+                Write-Host "           To isolate push tokens with gswitch, switch remote to HTTPS:" -ForegroundColor DarkYellow
+                Write-Host "           git remote set-url origin https://github.com/<org>/<repo>.git" -ForegroundColor DarkYellow
+            }
+        }
     }
     Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
@@ -195,23 +247,77 @@ function Switch-Account($acc, [bool]$isLocalSwitch) {
         return
     }
     
-    # 2. Switch Git Identity
+    $isRepo = (git rev-parse --is-inside-work-tree 2>$null) -eq "true"
+    
+    # 2. Switch Git Identity & Credential Helper
     if ($isLocalSwitch) {
-        $isRepo = (git rev-parse --is-inside-work-tree 2>$null) -eq "true"
         if (-not $isRepo) {
             Write-Host "[ERROR] Cannot apply --local: current directory is not a Git repository." -ForegroundColor Red
             return
         }
         git config --local user.name "$($acc.Name)"
         git config --local user.email "$($acc.Email)"
+        git config --local credential.https://github.com.username "$($acc.Username)"
+        git config --local --unset-all credential.https://github.com.helper 2>$null
+        git config --local --add credential.https://github.com.helper "!git-account-switcher cred $($acc.Username)"
+        git config --local credential.https://gist.github.com.username "$($acc.Username)"
+        git config --local --unset-all credential.https://gist.github.com.helper 2>$null
+        git config --local --add credential.https://gist.github.com.helper "!git-account-switcher cred $($acc.Username)"
+        
+        if ($acc.SigningKey) {
+            git config --local user.signingkey "$($acc.SigningKey)"
+            git config --local commit.gpgsign true
+            if ($acc.SigningKey -match '^(ssh-|key::)') {
+                git config --local gpg.format ssh
+            }
+            Write-Host "[OK] Git signingkey (LOCAL) : $($acc.SigningKey)" -ForegroundColor Green
+        } else {
+            git config --local --unset-all user.signingkey 2>$null
+            git config --local --unset-all commit.gpgsign 2>$null
+            git config --local --unset-all gpg.format 2>$null
+        }
+
         Write-Host "[OK] GitHub CLI switched to : $($acc.Username)" -ForegroundColor Green
         Write-Host "[OK] Git user.name (LOCAL)  : $($acc.Name)" -ForegroundColor Green
         Write-Host "[OK] Git user.email (LOCAL) : $($acc.Email)" -ForegroundColor Green
+        Write-Host "[OK] Git cred helper (LOCAL): !git-account-switcher cred $($acc.Username)" -ForegroundColor Green
         Write-Host ""
-        Write-Host "=> Applied locally to this repository only!" -ForegroundColor Cyan
+        Write-Host "=> Applied locally with isolated push permissions for this repository only!" -ForegroundColor Cyan
     } else {
+        if ($isRepo) {
+            $hasLocalName = git config --local user.name 2>$null
+            $hasLocalEmail = git config --local user.email 2>$null
+            $hasLocalCred = git config --local credential.https://github.com.username 2>$null
+            $hasLocalSign = git config --local user.signingkey 2>$null
+            if ($hasLocalName -or $hasLocalEmail -or $hasLocalCred -or $hasLocalSign) {
+                git config --local --unset-all user.name 2>$null
+                git config --local --unset-all user.email 2>$null
+                git config --local --unset-all credential.https://github.com.username 2>$null
+                git config --local --unset-all credential.https://github.com.helper 2>$null
+                git config --local --unset-all credential.https://gist.github.com.username 2>$null
+                git config --local --unset-all credential.https://gist.github.com.helper 2>$null
+                git config --local --unset-all user.signingkey 2>$null
+                git config --local --unset-all commit.gpgsign 2>$null
+                git config --local --unset-all gpg.format 2>$null
+                Write-Host "[INFO] Cleared repository-local overrides in current repository." -ForegroundColor Yellow
+            }
+        }
+        
         git config --global user.name "$($acc.Name)"
         git config --global user.email "$($acc.Email)"
+        if ($acc.SigningKey) {
+            git config --global user.signingkey "$($acc.SigningKey)"
+            git config --global commit.gpgsign true
+            if ($acc.SigningKey -match '^(ssh-|key::)') {
+                git config --global gpg.format ssh
+            }
+            Write-Host "[OK] Git signingkey (GLOBAL): $($acc.SigningKey)" -ForegroundColor Green
+        } else {
+            git config --global --unset-all user.signingkey 2>$null
+            git config --global --unset-all commit.gpgsign 2>$null
+            git config --global --unset-all gpg.format 2>$null
+        }
+
         Write-Host "[OK] GitHub CLI switched to : $($acc.Username)" -ForegroundColor Green
         Write-Host "[OK] Git user.name (GLOBAL) : $($acc.Name)" -ForegroundColor Green
         Write-Host "[OK] Git user.email (GLOBAL): $($acc.Email)" -ForegroundColor Green
@@ -285,11 +391,13 @@ function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string
         $customAliases = Read-Host "Enter additional shortcut aliases (comma-separated, e.g. 'work, w, corp') [optional]"
     }
 
+    $existingAcc = $null
     $accounts = New-Object System.Collections.ArrayList
     foreach ($item in @(Get-Accounts)) {
         if ($item.Key.ToLower() -ne $key.ToLower() -and $item.Username.ToLower() -ne $user.ToLower()) {
             $null = $accounts.Add($item)
         } else {
+            $existingAcc = $item
             Write-Host "[INFO] Updating existing profile for '$($item.Label)' ($($item.Username))..." -ForegroundColor Yellow
         }
     }
@@ -299,6 +407,15 @@ function Add-AccountInteractive([string]$passedUser, [string]$passedKey, [string
     $null = $aliasSet.Add("$newIdx")
     if ($aliasSet -notcontains $key.ToLower()) { $null = $aliasSet.Add($key.ToLower()) }
     if ($aliasSet -notcontains $user.ToLower()) { $null = $aliasSet.Add($user.ToLower()) }
+    # Preserve existing custom text aliases if updating
+    if ($existingAcc -and $existingAcc.AliasList) {
+        foreach ($al in $existingAcc.AliasList) {
+            $alStr = [string]$al
+            if ($alStr -notmatch '^\d+$' -and -not $aliasSet.Contains($alStr.ToLower())) {
+                $null = $aliasSet.Add($alStr.ToLower())
+            }
+        }
+    }
     if ($customAliases) {
         $parts = $customAliases -split '[,; ]+'
         foreach ($p in $parts) {
@@ -589,9 +706,28 @@ function Bind-FolderToAccount([string]$folderPath, [string]$targetAccount) {
     # Normalize folder path for gitdir (must use forward slashes / and end with /)
     $gitdirPattern = $resolvedFolder.Replace('\', '/').TrimEnd('/') + '/'
 
-    # 1. Create included gitconfig file
+    # 1. Create included gitconfig file (authorship + isolated credential helper)
     $profileConfigFile = "$HOME\.gitconfig-$($match.Key)"
-    $configContent = "[user]`n    name = $($match.Name)`n    email = $($match.Email)`n"
+    $signingSection = ""
+    if ($match.SigningKey) {
+        $signingSection = "`n    signingkey = $($match.SigningKey)`n[commit]`n    gpgsign = true"
+        if ($match.SigningKey -match '^(ssh-|key::)') {
+            $signingSection += "`n[gpg]`n    format = ssh"
+        }
+    }
+    $configContent = @"
+[user]
+    name = $($match.Name)
+    email = $($match.Email)$signingSection
+[credential "https://github.com"]
+    username = $($match.Username)
+    helper = 
+    helper = "!git-account-switcher cred $($match.Username)"
+[credential "https://gist.github.com"]
+    username = $($match.Username)
+    helper = 
+    helper = "!git-account-switcher cred $($match.Username)"
+"@
     $configContent | Set-Content -Path $profileConfigFile -Encoding UTF8
 
     # 2. Add to global ~/.gitconfig
@@ -601,9 +737,10 @@ function Bind-FolderToAccount([string]$folderPath, [string]$targetAccount) {
 
     Write-Host ""
     Write-Host "[OK] Folder '$resolvedFolder' successfully bound to account '$($match.Label)'!" -ForegroundColor Green
-    Write-Host "     All Git repositories inside '$resolvedFolder' will automatically commit as:" -ForegroundColor Cyan
-    Write-Host "     Name : $($match.Name)" -ForegroundColor Green
-    Write-Host "     Email: $($match.Email)" -ForegroundColor Green
+    Write-Host "     All Git repositories inside '$resolvedFolder' will automatically commit & push as:" -ForegroundColor Cyan
+    Write-Host "     Name    : $($match.Name)" -ForegroundColor Green
+    Write-Host "     Email   : $($match.Email)" -ForegroundColor Green
+    Write-Host "     Username: $($match.Username) (auto-authenticated via gh token)" -ForegroundColor Green
     Write-Host ""
 }
 
@@ -714,7 +851,9 @@ function Sync-FromGitHubCli {
     $detectedUsernames = @()
     foreach ($line in $statusLines) {
         if ($line -match 'Logged in to .* account ([a-zA-Z0-9_-]+)') {
-            $detectedUsernames += $matches[1]
+            if ($detectedUsernames -notcontains $matches[1]) {
+                $detectedUsernames += $matches[1]
+            }
         }
     }
     
@@ -727,47 +866,206 @@ function Sync-FromGitHubCli {
     Write-Host "Found $($detectedUsernames.Count) account(s): $($detectedUsernames -join ', ')" -ForegroundColor Green
     
     $existing = Get-Accounts
-    $origUser = Get-ActiveGhUser
-    $newList = @()
-    $idx = 1
+    $newList = New-Object System.Collections.ArrayList
     
+    # 1. Preserve existing accounts that are authenticated, or keep existing ones
     foreach ($u in $detectedUsernames) {
-        Write-Host "  Fetching account details for '$u'..." -ForegroundColor DarkGray
-        gh auth switch -u $u 2>$null | Out-Null
-        $userInfo = gh api user --jq "{id: .id, login: .login, name: .name, email: .email}" 2>$null | ConvertFrom-Json
-        
-        $userId   = if ($userInfo.id) { $userInfo.id } else { "0" }
-        $userName = if ($userInfo.name) { $userInfo.name } else { $u }
-        $userEmail = "$userId+$u@users.noreply.github.com"
-        
-        # Check if already in config to preserve custom label/key
         $match = $existing | Where-Object { $_.Username.ToLower() -eq $u.ToLower() }
-        $key = if ($match -and $match.Key) { $match.Key } else { $u.ToLower() }
-        $label = if ($match -and $match.Label) { $match.Label } else { $u }
-        $desc = if ($match -and $match.Description) { $match.Description } else { "GitHub account $u" }
-        $aliases = if ($match -and $match.AliasList) { $match.AliasList } else { @("$idx", $key, $u.ToLower()) }
-        
-        $newList += @{
-            Index       = $idx
-            Key         = $key
-            AliasList   = $aliases
-            Label       = $label
-            Username    = $u
-            Name        = $userName
-            Email       = $userEmail
-            Description = $desc
+        if ($match) {
+            Write-Host "  [KEEP] Preserved profile for '$($match.Label)' ($u)" -ForegroundColor Green
+            $null = $newList.Add($match)
+        } else {
+            Write-Host "  [NEW] Fetching account details for '$u'..." -ForegroundColor DarkCyan
+            $userInfo = $null
+            try {
+                $userInfo = gh api "users/$u" --jq "{id: .id, login: .login, name: .name}" 2>$null | ConvertFrom-Json
+            } catch {}
+            
+            $userId   = if ($userInfo -and $userInfo.id) { $userInfo.id } else { "0" }
+            $userName = if ($userInfo -and $userInfo.name) { $userInfo.name } else { $u }
+            $userEmail = if ($userId -ne "0") { "$userId+$u@users.noreply.github.com" } else { "$u@users.noreply.github.com" }
+            
+            $null = $newList.Add([PSCustomObject]@{
+                Key         = $u.ToLower()
+                AliasList   = @($u.ToLower())
+                Label       = $u
+                Username    = $u
+                Name        = $userName
+                Email       = $userEmail
+                Description = "GitHub account $u"
+            })
         }
-        $idx++
     }
 
-    if ($origUser -and $origUser -ne "(none / not logged in)") {
-        gh auth switch -u $origUser 2>$null | Out-Null
+    # Also keep any accounts that might be configured but not currently in gh auth status
+    foreach ($old in $existing) {
+        $inDetected = $detectedUsernames | Where-Object { $_.ToLower() -eq $old.Username.ToLower() }
+        if (-not $inDetected) {
+            $null = $newList.Add($old)
+        }
     }
-    
+
     Save-Accounts $newList
     Write-Host ""
     Write-Host "[OK] Successfully synced $($newList.Count) account(s) to $ConfigFile!" -ForegroundColor Green
     Show-List
+}
+
+function Invoke-Doctor {
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host "  GIT ACCOUNT SWITCHER - SYSTEM & REPO DIAGNOSTICS (DOCTOR)  " -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    
+    $issueCount = 0
+    $warnCount = 0
+
+    # 1. Check Git
+    Write-Host "`n[1/5] Checking Git toolchain..." -ForegroundColor Yellow
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($gitCmd) {
+        $gitVer = (git --version 2>$null) -replace 'git version ', ''
+        Write-Host "  [PASS] Git executable found : $($gitCmd.Source)" -ForegroundColor Green
+        Write-Host "         Version              : $gitVer" -ForegroundColor Gray
+    } else {
+        Write-Host "  [FAIL] Git executable not found in PATH." -ForegroundColor Red
+        $issueCount++
+    }
+
+    # 2. Check GitHub CLI (gh)
+    Write-Host "`n[2/5] Checking GitHub CLI (gh)..." -ForegroundColor Yellow
+    $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
+    if ($ghCmd) {
+        $ghVer = (gh --version 2>$null | Select-Object -First 1) -replace 'gh version ', ''
+        Write-Host "  [PASS] GitHub CLI found     : $($ghCmd.Source)" -ForegroundColor Green
+        Write-Host "         Version              : $ghVer" -ForegroundColor Gray
+    } else {
+        Write-Host "  [FAIL] GitHub CLI (gh) not found in PATH." -ForegroundColor Red
+        Write-Host "         Please install from https://cli.github.com" -ForegroundColor DarkGray
+        $issueCount++
+    }
+
+    # 3. Check Account Profiles & Tokens
+    Write-Host "`n[3/5] Checking account profiles & authentication tokens..." -ForegroundColor Yellow
+    $accounts = @(Get-Accounts)
+    if ($accounts.Count -eq 0) {
+        Write-Host "  [WARN] No account profiles configured in $ConfigFile." -ForegroundColor Yellow
+        Write-Host "         Run 'gswitch sync' to auto-detect accounts from GitHub CLI." -ForegroundColor DarkGray
+        $warnCount++
+    } else {
+        Write-Host "  Found $($accounts.Count) account profile(s) in $($ConfigFile):" -ForegroundColor Gray
+        foreach ($a in $accounts) {
+            $tokenOk = $false
+            if ($ghCmd) {
+                try {
+                    $tokenOut = gh auth token -u $a.Username 2>$null
+                    if ($LASTEXITCODE -eq 0 -and $tokenOut -and $tokenOut.Trim().Length -gt 0) {
+                        $tokenOk = $true
+                    }
+                } catch {}
+            }
+            if ($tokenOk) {
+                Write-Host "  [PASS] Profile '$($a.Label)' ($($a.Username)): Valid OAuth token" -ForegroundColor Green
+            } else {
+                Write-Host "  [WARN] Profile '$($a.Label)' ($($a.Username)): Token missing or expired" -ForegroundColor Yellow
+                Write-Host "         Run 'gh auth login -h github.com' to authenticate this user." -ForegroundColor DarkYellow
+                $warnCount++
+            }
+        }
+    }
+
+    # 4. Check Folder Bindings (includeIf)
+    Write-Host "`n[4/5] Checking folder bindings (includeIf)..." -ForegroundColor Yellow
+    $bindingLines = git config --global --list --show-origin 2>$null | Where-Object { $_ -match 'includeif\.gitdir' }
+    if (-not $bindingLines) {
+        Write-Host "  [INFO] No folder bindings configured in ~/.gitconfig." -ForegroundColor Gray
+        Write-Host "         To bind a folder: gswitch bind <folder> <account>" -ForegroundColor DarkGray
+    } else {
+        foreach ($line in $bindingLines) {
+            if ($line -match 'includeif\.gitdir(?:/i)?:([^.]*?)\.path=(.*)') {
+                $boundPattern = $matches[1]
+                $includedFile = $matches[2]
+                
+                $cleanFolder = $boundPattern.TrimEnd('/')
+                $folderExists = Test-Path $cleanFolder
+                
+                $fileClean = $includedFile.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+                $fileExists = Test-Path $fileClean
+                
+                if ($folderExists -and $fileExists) {
+                    Write-Host "  [PASS] Binding: $boundPattern -> $includedFile" -ForegroundColor Green
+                    $helperConfig = git config -f $fileClean --get credential.https://github.com.helper 2>$null
+                    if ($helperConfig -like "*git-account-switcher cred*") {
+                        Write-Host "         Credential Helper: Configured ($helperConfig)" -ForegroundColor DarkGreen
+                    } else {
+                        Write-Host "  [WARN] Credential helper missing or non-standard in $fileClean" -ForegroundColor Yellow
+                        Write-Host "         Re-run 'gswitch bind $cleanFolder <account>' to repair." -ForegroundColor DarkYellow
+                        $warnCount++
+                    }
+                } else {
+                    if (-not $folderExists) {
+                        Write-Host "  [WARN] Bound folder does not exist: $boundPattern" -ForegroundColor Yellow
+                        $warnCount++
+                    }
+                    if (-not $fileExists) {
+                        Write-Host "  [FAIL] Target config file missing: $includedFile" -ForegroundColor Red
+                        $issueCount++
+                    }
+                }
+            }
+        }
+    }
+
+    # 5. Check Current Working Directory / Repository
+    Write-Host "`n[5/5] Checking current repository state..." -ForegroundColor Yellow
+    $isRepo = (git rev-parse --is-inside-work-tree 2>$null) -eq "true"
+    if ($isRepo) {
+        $effName = git config user.name 2>$null
+        $effEmail = git config user.email 2>$null
+        $effSign = git config user.signingkey 2>$null
+        $remoteUrl = git config --get remote.origin.url 2>$null
+
+        Write-Host "  [PASS] Inside Git repository: $((Get-Location).Path)" -ForegroundColor Green
+        Write-Host "         Active User Name  : $effName" -ForegroundColor Gray
+        Write-Host "         Active User Email : $effEmail" -ForegroundColor Gray
+        if ($effSign) {
+            Write-Host "         Active Signing Key: $effSign" -ForegroundColor Gray
+        }
+        
+        if ($remoteUrl) {
+            Write-Host "         Remote Origin URL : $remoteUrl" -ForegroundColor Gray
+            if ($remoteUrl -match '^git@github\.com:' -or $remoteUrl -match '^ssh://') {
+                Write-Host "  [WARN] Repository uses SSH remote ($remoteUrl)." -ForegroundColor Yellow
+                Write-Host "         Git credential helper is bypassed for SSH transport." -ForegroundColor DarkYellow
+                Write-Host "         To enable HTTPS token switching: git remote set-url origin https://github.com/<org>/<repo>.git" -ForegroundColor DarkYellow
+                $warnCount++
+            } else {
+                Write-Host "  [PASS] Remote uses HTTPS transport (credential helper active)" -ForegroundColor Green
+            }
+        } else {
+            Write-Host "  [INFO] No remote.origin.url configured in this repo." -ForegroundColor Gray
+        }
+
+        $locName = git config --local user.name 2>$null
+        $locEmail = git config --local user.email 2>$null
+        if ($locName -or $locEmail) {
+            Write-Host "  [INFO] Local repository override active ($locName <$locEmail>)" -ForegroundColor Cyan
+        }
+    } else {
+        Write-Host "  [INFO] Current directory is not a Git repository." -ForegroundColor Gray
+    }
+
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Cyan
+    if ($issueCount -eq 0 -and $warnCount -eq 0) {
+        Write-Host "  DOCTOR RESULT: ALL CHECKS PASSED [OK]" -ForegroundColor Green
+    } elseif ($issueCount -eq 0) {
+        Write-Host "  DOCTOR RESULT: $warnCount WARNING(S) FOUND (SYSTEM OPERATIONAL)" -ForegroundColor Yellow
+    } else {
+        Write-Host "  DOCTOR RESULT: $issueCount ISSUE(S), $warnCount WARNING(S) FOUND" -ForegroundColor Red
+    }
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host ""
 }
 
 function Show-HelpMessage {
@@ -783,6 +1081,7 @@ function Show-HelpMessage {
     Write-Host "  gswitch                             Open interactive account selection menu" -ForegroundColor White
     Write-Host "  gswitch status | who                View active GitHub token & Git identities" -ForegroundColor White
     Write-Host "  gswitch list | ls                   List all configured account profiles with aliases" -ForegroundColor White
+    Write-Host "  gswitch doctor | check              Run system & repository diagnostic health checks" -ForegroundColor White
     Write-Host "  gswitch alias [acc] [shortcut]      Add or view shortcut aliases for quick switching" -ForegroundColor White
     Write-Host "  gswitch unalias [acc] [alias]       Remove a shortcut alias from an account profile" -ForegroundColor White
     Write-Host "  gswitch bind [dir] [account]        Permanently bind an entire folder to an account" -ForegroundColor White
@@ -802,6 +1101,7 @@ function Show-HelpMessage {
     Write-Host "  bind     Bind a directory to an account (includeIf): gswitch bind <dir> <account>" -ForegroundColor White
     Write-Host "  unbind   Remove a folder binding: gswitch unbind <dir>" -ForegroundColor White
     Write-Host "  bindings List all active directory bindings configured on system" -ForegroundColor White
+    Write-Host "  doctor   Run complete self-diagnostics on Git, GitHub CLI, tokens, bindings, and remotes" -ForegroundColor White
     Write-Host "  edit     Open accounts.json directly in VS Code / Notepad / default editor" -ForegroundColor White
     Write-Host "  remove   Remove a profile by key, user, alias, or index: gswitch remove <key> [-f]" -ForegroundColor White
     Write-Host "  sync     Scan 'gh auth status', fetch IDs, and configure private noreply emails" -ForegroundColor White
@@ -841,6 +1141,34 @@ function Show-HelpMessage {
 # -------------------------------------------------------------
 # Dispatcher
 # -------------------------------------------------------------
+if ($Command -eq "cred") {
+    $targetUser = $Argument
+    $action = $Extra1
+    if (-not $targetUser) {
+        $stdinLines = @($input)
+        foreach ($line in $stdinLines) {
+            if ($line -match '^username=(.+)$') {
+                $targetUser = $matches[1].Trim()
+                break
+            }
+        }
+    }
+    if ($action -eq "get" -or -not $action) {
+        if ($targetUser) {
+            $token = ""
+            try {
+                $token = (gh auth token -u $targetUser 2>$null)
+                if ($token) { $token = $token.Trim() }
+            } catch {}
+            if ($token) {
+                Write-Output "username=$targetUser"
+                Write-Output "password=$token"
+            }
+        }
+    }
+    exit 0
+}
+
 if ($Help -or $Command -in @("help", "-h", "--help", "-?", "/?")) {
     Show-HelpMessage
     exit 0
@@ -848,6 +1176,11 @@ if ($Help -or $Command -in @("help", "-h", "--help", "-?", "/?")) {
 
 if ($Command -in @("status", "who", "current", "-s")) {
     Show-Status
+    exit 0
+}
+
+if ($Command -in @("doctor", "check", "diag", "diagnose")) {
+    Invoke-Doctor
     exit 0
 }
 
@@ -984,13 +1317,11 @@ foreach ($a in $accounts) {
     }
 }
 
-# 2. Fuzzy match fallback
-if (-not $selected) {
+# 2. Substring match fallback (minimum 3 chars, query must be part of username or key)
+if (-not $selected -and $cleanTarget.Length -ge 3) {
     foreach ($a in $accounts) {
         if ($a.Username.ToLower().Contains($cleanTarget) -or `
-            $cleanTarget.Contains($a.Username.ToLower()) -or `
-            $a.Key.ToLower().Contains($cleanTarget) -or `
-            $cleanTarget.Contains($a.Key.ToLower())) {
+            $a.Key.ToLower().Contains($cleanTarget)) {
             $selected = $a
             break
         }

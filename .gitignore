@@ -13,3 +13,7 @@ Desktop.ini
 *.local.json
 config/accounts.json
 accounts.json
+
+# Static Analysis Scans
+static_analysis_*
+

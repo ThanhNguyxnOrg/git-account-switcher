@@ -1,2 +1,2 @@
 @echo off
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0git-account-switcher.ps1" %*
+powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File "%~dp0git-account-switcher.ps1" %*

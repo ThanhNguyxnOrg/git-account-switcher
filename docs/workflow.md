@@ -151,7 +151,7 @@ Select account [1-2], 's' to sync, 'a' to add, 'e' to edit, or Enter to cancel:
 
 ### 4. Optional Power Feature: Automatic Folder Isolation (Set & Forget)
 
-If you organize your projects into separate directories (e.g., all company projects in `C:\Projects\Work` and personal code in `C:\Projects\Personal`), you can permanently bind directories to accounts so Git automatically switches identity without any manual command:
+If you organize your projects into separate directories (e.g., all company projects in `C:\Projects\Work` and personal code in `C:\Projects\Personal`), you can permanently bind directories to accounts so Git automatically switches **both** your commit author **and your HTTPS push token** without any manual command:
 
 ```bash
 # 1. Bind directory to account profile (replace with your folder path):
@@ -165,7 +165,7 @@ gswitch bindings
 gswitch unbind C:\Projects\Work
 ```
 
-*Inside any bound directory, `git who` will automatically detect and report `[Folder Override via includeIf detected]`.*
+*Inside any bound directory, `git who` will automatically detect and report `[Folder includeIf Binding Active in this directory]`. Both commit author and push authentication (`git push`) are isolated to that account via the built-in dynamic credential helper.*
 
 ---
 

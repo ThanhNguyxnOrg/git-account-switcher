@@ -114,19 +114,23 @@ Once the user replies with their preferences:
 
 ### Step 5: Verification & Self-Testing Checklist
 Before completing your response to the user, run these non-destructive checks:
-1. **List configured profiles:**
+1. **Run system self-diagnostics:**
+   ```bash
+   gswitch doctor
+   ```
+2. **List configured profiles:**
    ```bash
    gswitch list
    ```
-2. **Confirm active identity:**
+3. **Confirm active identity:**
    ```bash
    gswitch status
    ```
-3. **Verify help output:**
+4. **Verify help output:**
    ```bash
    gswitch help
    ```
-4. **Run integration test suite (optional verification):**
+5. **Run integration test suite (optional verification):**
    - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\test-all.ps1`
    - Unix: `bash ./tests/test-all.sh`
 
@@ -138,7 +142,8 @@ Before completing your response to the user, run these non-destructive checks:
 | :--- | :--- | :--- |
 | **Missing `gh` CLI** | Command not found: `gh` | Install via `winget install --id GitHub.cli` (Windows) or `brew install gh` (macOS), then restart terminal. |
 | **No Logged-In Accounts** | `gh auth status` returns "You are not logged in" | Ask the user to run `gh auth login` in their terminal to complete the web browser OAuth flow. |
-| **Windows Credential Manager Conflict** | Git pushes as old account despite switching | Run `git config --global --unset-all credential.helper` followed by `git config --global credential.helper ""` and `git config --global --add credential.helper "!gh auth git-credential"`. |
+| **Windows Credential Manager Conflict** | Git pushes as old account despite switching | Run `gswitch doctor` to diagnose. The dynamic credential bridge (`gswitch cred <user>`) automatically overrides GCM when configured. |
+| **SSH Remote Bypass** | Git push uses wrong SSH key or 403 despite gswitch | Run `gswitch doctor` or `gswitch status`. If remote is `git@github.com:...`, switch to HTTPS via `git remote set-url origin https://github.com/<org>/<repo>.git` to activate HTTPS token isolation. |
 | **Expired Token** | `gh api` returns 401 Unauthorized | Run `gh auth refresh -h github.com`. |
 | **Repository-Local Work** | User only wants to change email for 1 repo | Instruct the user to run `cd <repo> && gswitch -l <key>`. |
 | **Folder-Specific Separation** | User wants all repos in a folder bound to one account | Run `gswitch bind <dir> <account>` (Optional set-and-forget power feature). |

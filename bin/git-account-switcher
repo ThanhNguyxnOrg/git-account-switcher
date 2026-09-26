@@ -7,15 +7,47 @@
 # If running in Windows Git Bash and powershell.exe is available, delegate to powershell
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && command -v powershell.exe >/dev/null 2>&1; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    exec powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
+    exec powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
+fi
+
+if [[ "$1" == "cred" ]]; then
+    target_user="$2"
+    action="$3"
+    if [[ -z "$target_user" ]]; then
+        while IFS= read -r line; do
+            if [[ $line =~ ^username=(.+)$ ]]; then
+                target_user="${BASH_REMATCH[1]}"
+                break
+            fi
+        done
+    fi
+    if [[ "$action" == "get" || -z "$action" ]]; then
+        if [[ -n "$target_user" ]]; then
+            token=$(gh auth token -u "$target_user" 2>/dev/null || true)
+            if [[ -n "$token" ]]; then
+                echo "username=$target_user"
+                echo "password=$token"
+            fi
+        fi
+    fi
+    exit 0
 fi
 
 CONFIG_FILE="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 
+get_active_gh_user() {
+    local u
+    u=$(gh auth status --active 2>&1 | grep -oE 'Logged in to .* account [a-zA-Z0-9_-]+' | awk '{print $NF}' || true)
+    if [[ -z "$u" ]]; then
+        u=$(gh api user --jq '.login' 2>/dev/null || echo "(none / not logged in)")
+    fi
+    echo "$u"
+}
+
 show_status() {
     local active_gh
-    active_gh=$(gh api user --jq '.login' 2>/dev/null || echo "(none / not logged in)")
+    active_gh=$(get_active_gh_user)
     local global_name
     global_name=$(git config --global user.name 2>/dev/null || echo "(not set)")
     local global_email
@@ -38,10 +70,14 @@ show_status() {
     echo -e " Git Global Name   : \033[0;32m$global_name\033[0m"
     echo -e " Git Global Email  : \033[0;32m$global_email\033[0m"
 
-    local eff_name
+    local eff_name eff_email eff_sign
     eff_name=$(git config user.name 2>/dev/null || echo "")
-    local eff_email
     eff_email=$(git config user.email 2>/dev/null || echo "")
+    eff_sign=$(git config user.signingkey 2>/dev/null || echo "")
+
+    if [[ -n "$eff_sign" ]]; then
+        echo -e " Git Signing Key   : \033[0;32m$eff_sign\033[0m"
+    fi
 
     if [[ "$is_repo" == "true" && (-n "$local_name" || -n "$local_email") ]]; then
         echo " ------------------------------------------------------------"
@@ -54,13 +90,30 @@ show_status() {
         echo -e " Git Effective Name : \033[1;33m$eff_name\033[0m"
         echo -e " Git Effective Email: \033[1;33m$eff_email\033[0m"
     fi
+
+    if [[ "$is_repo" == "true" ]]; then
+        local remote_url
+        remote_url=$(git config --get remote.origin.url 2>/dev/null || echo "")
+        if [[ -n "$remote_url" ]]; then
+            echo " ------------------------------------------------------------"
+            echo -e " Remote Origin     : \033[0;90m$remote_url\033[0m"
+            case "$remote_url" in
+                git@github.com:*|ssh://*)
+                    echo -e " \033[1;33m[WARNING] Remote uses SSH ($remote_url).\033[0m"
+                    echo -e "           \033[0;33mGit credential helper applies to HTTPS URLs.\033[0m"
+                    echo -e "           \033[0;33mTo isolate push tokens with gswitch, switch remote to HTTPS:\033[0m"
+                    echo -e "           \033[0;33mgit remote set-url origin https://github.com/<org>/<repo>.git\033[0m"
+                    ;;
+            esac
+        fi
+    fi
     echo "============================================================"
     echo ""
 }
 
 show_list() {
     local active_gh
-    active_gh=$(gh api user --jq '.login' 2>/dev/null || echo "")
+    active_gh=$(get_active_gh_user)
 
     echo ""
     echo -e "\033[1;33mConfigured Account Profiles:\033[0m"
@@ -117,40 +170,52 @@ sync_from_gh() {
     mkdir -p "$CONFIG_DIR"
 
     python3 -c "
-import json, sys, subprocess
+import json, os, sys, subprocess
 
 accounts = sys.argv[1:]
-orig_user = ''
-try:
-    orig_user = subprocess.check_output(['gh', 'api', 'user', '--jq', '.login'], stderr=subprocess.DEVNULL).decode().strip()
-except Exception:
-    pass
+existing = []
+if os.path.exists('$CONFIG_FILE'):
+    try:
+        with open('$CONFIG_FILE') as f:
+            existing = json.load(f)
+    except Exception:
+        pass
 
 result = []
 for idx, user in enumerate(accounts, 1):
-    try:
-        subprocess.call(['gh', 'auth', 'switch', '-u', user], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        out = subprocess.check_output(['gh', 'api', 'user'], stderr=subprocess.DEVNULL)
-        info = json.loads(out)
-        uid = info.get('id', 0)
-        uname = info.get('name') or user
-    except Exception:
+    matched = None
+    for ex in existing:
+        if ex.get('username', '').lower() == user.lower():
+            matched = ex
+            break
+    if matched:
+        aliases = [str(x) for x in matched.get('aliases', []) if not str(x).isdigit()]
+        if str(idx) not in aliases:
+            aliases.insert(0, str(idx))
+        matched['index'] = idx
+        matched['aliases'] = aliases
+        result.append(matched)
+    else:
         uid = 0
         uname = user
-
-    result.append({
-        'index': idx,
-        'key': user.lower(),
-        'aliases': [str(idx), user.lower()],
-        'label': user,
-        'username': user,
-        'name': uname,
-        'email': f'{uid}+{user}@users.noreply.github.com',
-        'description': f'GitHub account {user}'
-    })
-
-if orig_user:
-    subprocess.call(['gh', 'auth', 'switch', '-u', orig_user], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            out = subprocess.check_output(['gh', 'api', f'users/{user}'], stderr=subprocess.DEVNULL)
+            info = json.loads(out)
+            uid = info.get('id', 0)
+            uname = info.get('name') or user
+        except Exception:
+            pass
+        email = f'{uid}+{user}@users.noreply.github.com' if uid else f'{user}@users.noreply.github.com'
+        result.append({
+            'index': idx,
+            'key': user.lower(),
+            'aliases': [str(idx), user.lower()],
+            'label': user,
+            'username': user,
+            'name': uname,
+            'email': email,
+            'description': f'GitHub account {user}'
+        })
 
 with open('$CONFIG_FILE', 'w') as f:
     json.dump(result, f, indent=2)
@@ -324,7 +389,11 @@ if not proceed:
 
 if proceed:
     data = [a for a in data if a != match]
-    for idx, a in enumerate(data, 1): a['index'] = idx
+    for idx, a in enumerate(data, 1):
+        a['index'] = idx
+        cleaned_aliases = [str(x) for x in a.get('aliases', []) if not str(x).isdigit()]
+        cleaned_aliases.insert(0, str(idx))
+        a['aliases'] = cleaned_aliases
     with open(cfg, 'w') as f: json.dump(data, f, indent=2)
     print(f\"\n[OK] Account '{match['label']}' ({match['username']}) removed successfully.\")
 else:
@@ -521,18 +590,40 @@ if not match:
     sys.exit(1)
 
 home = os.path.expanduser('~')
-prof_cfg = os.path.join(home, f\".gitconfig-{match['key']}\")
+prof_cfg = os.path.join(home, f".gitconfig-{match['key']}")
+u = match['username']
+skey = match.get('signingkey', '')
+sign_sec = ""
+if skey:
+    sign_sec = f"\n    signingkey = {skey}\n[commit]\n    gpgsign = true"
+    if skey.startswith('ssh-') or skey.startswith('key::'):
+        sign_sec += "\n[gpg]\n    format = ssh"
+
 with open(prof_cfg, 'w') as f:
-    f.write(f\"[user]\n    name = {match['name']}\n    email = {match['email']}\n\")
+    f.write(f"""[user]
+    name = {match['name']}
+    email = {match['email']}{sign_sec}
+[credential "https://github.com"]
+    username = {u}
+    helper = 
+    helper = "!git-account-switcher cred {u}"
+[credential "https://gist.github.com"]
+    username = {u}
+    helper = 
+    helper = "!git-account-switcher cred {u}"
+""")
 
 pat = sys.argv[2]
-inc_key = f\"includeIf.gitdir:{pat}.path\"
-subprocess.call(['git', 'config', '--global', inc_key, prof_cfg])
+is_win = (os.name == 'nt' or sys.platform == 'win32' or sys.platform == 'cygwin' or 'CYGWIN' in os.uname().sysname if hasattr(os, 'uname') else False)
+inc_key = f"includeIf.gitdir/i:{pat}.path" if is_win else f"includeIf.gitdir:{pat}.path"
+norm_cfg = prof_cfg.replace('\\', '/')
+subprocess.call(['git', 'config', '--global', inc_key, norm_cfg])
 
 print(f\"\n[OK] Folder '{sys.argv[3]}' successfully bound to account '{match['label']}'!\")
-print(f\"     All Git repositories inside will automatically commit as:\")
-print(f\"     Name : {match['name']}\")
-print(f\"     Email: {match['email']}\n\")
+print(f\"     All Git repositories inside will automatically commit & push as:\")
+print(f\"     Name    : {match['name']}\")
+print(f\"     Email   : {match['email']}\")
+print(f\"     Username: {u} (auto-authenticated via gh token)\n\")
 " "$target" "$pattern" "$resolved"
 }
 
@@ -588,6 +679,167 @@ show_bindings() {
     echo ""
 }
 
+doctor() {
+    echo ""
+    echo "============================================================"
+    echo "  GIT ACCOUNT SWITCHER - SYSTEM & REPO DIAGNOSTICS (DOCTOR)  "
+    echo "============================================================"
+    local issue_count=0
+    local warn_count=0
+
+    echo ""
+    echo -e "\033[1;33m[1/5] Checking Git toolchain...\033[0m"
+    if command -v git >/dev/null 2>&1; then
+        local git_ver
+        git_ver=$(git --version 2>/dev/null | sed 's/git version //')
+        echo -e "  \033[0;32m[PASS] Git executable found : $(command -v git)\033[0m"
+        echo -e "         Version              : $git_ver"
+    else
+        echo -e "  \033[0;31m[FAIL] Git executable not found in PATH.\033[0m"
+        ((issue_count++)) || true
+    fi
+
+    echo ""
+    echo -e "\033[1;33m[2/5] Checking GitHub CLI (gh)...\033[0m"
+    if command -v gh >/dev/null 2>&1; then
+        local gh_ver
+        gh_ver=$(gh --version 2>/dev/null | head -n 1 | sed 's/gh version //')
+        echo -e "  \033[0;32m[PASS] GitHub CLI found     : $(command -v gh)\033[0m"
+        echo -e "         Version              : $gh_ver"
+    else
+        echo -e "  \033[0;31m[FAIL] GitHub CLI (gh) not found in PATH.\033[0m"
+        ((issue_count++)) || true
+    fi
+
+    echo ""
+    echo -e "\033[1;33m[3/5] Checking account profiles & authentication tokens...\033[0m"
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo -e "  \033[1;33m[WARN] Configuration file not found: $CONFIG_FILE\033[0m"
+        ((warn_count++)) || true
+    else
+        python3 -c "
+import json, subprocess, sys
+try:
+    with open('$CONFIG_FILE') as f:
+        accs = json.load(f)
+    print(f'  Found {len(accs)} account profile(s) in $CONFIG_FILE:')
+    warns = 0
+    for a in accs:
+        u = a.get('username', '')
+        lbl = a.get('label', u)
+        token_ok = False
+        try:
+            res = subprocess.run(['gh', 'auth', 'token', '-u', u], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode == 0 and res.stdout.strip():
+                token_ok = True
+        except Exception:
+            pass
+        if token_ok:
+            print(f'  \033[0;32m[PASS] Profile \'{lbl}\' ({u}): Valid OAuth token\033[0m')
+        else:
+            print(f'  \033[1;33m[WARN] Profile \'{lbl}\' ({u}): Token missing or expired\033[0m')
+            warns += 1
+    sys.exit(warns)
+except Exception as e:
+    print(f'  \033[0;31m[FAIL] Error reading $CONFIG_FILE: {e}\033[0m')
+    sys.exit(99)
+" 2>/dev/null
+        local py_status=$?
+        if [[ $py_status -eq 99 ]]; then
+            ((issue_count++)) || true
+        elif [[ $py_status -gt 0 ]]; then
+            ((warn_count += py_status)) || true
+        fi
+    fi
+
+    echo ""
+    echo -e "\033[1;33m[4/5] Checking folder bindings (includeIf)...\033[0m"
+    local binding_lines
+    binding_lines=$(git config --global --list --show-origin 2>/dev/null | grep -E 'includeif\.gitdir' || true)
+    if [[ -z "$binding_lines" ]]; then
+        echo -e "  [INFO] No folder bindings configured in ~/.gitconfig."
+    else
+        while IFS= read -r line; do
+            if [[ "$line" =~ includeif\.gitdir(/i)?:(.*)\.path=(.*) ]]; then
+                local b_dir="${BASH_REMATCH[2]}"
+                local inc_file="${BASH_REMATCH[3]}"
+                local clean_dir="${b_dir%/}"
+                local dir_ok=0
+                local file_ok=0
+                [[ -d "$clean_dir" ]] && dir_ok=1
+                [[ -f "$inc_file" ]] && file_ok=1
+                
+                if [[ $dir_ok -eq 1 && $file_ok -eq 1 ]]; then
+                    echo -e "  \033[0;32m[PASS] Binding: $b_dir -> $inc_file\033[0m"
+                    local helper_cfg
+                    helper_cfg=$(git config -f "$inc_file" --get credential.https://github.com.helper 2>/dev/null || true)
+                    if [[ "$helper_cfg" == *"git-account-switcher cred"* ]]; then
+                        echo -e "         Credential Helper: Configured ($helper_cfg)"
+                    else
+                        echo -e "  \033[1;33m[WARN] Credential helper missing in $inc_file\033[0m"
+                        ((warn_count++)) || true
+                    fi
+                else
+                    if [[ $dir_ok -eq 0 ]]; then
+                        echo -e "  \033[1;33m[WARN] Bound directory does not exist: $clean_dir\033[0m"
+                        ((warn_count++)) || true
+                    fi
+                    if [[ $file_ok -eq 0 ]]; then
+                        echo -e "  \033[0;31m[FAIL] Included file missing: $inc_file\033[0m"
+                        ((issue_count++)) || true
+                    fi
+                fi
+            fi
+        done <<< "$binding_lines"
+    fi
+
+    echo ""
+    echo -e "\033[1;33m[5/5] Checking current repository state...\033[0m"
+    local is_repo
+    is_repo=$(git rev-parse --is-inside-work-tree 2>/dev/null || echo "false")
+    if [[ "$is_repo" == "true" ]]; then
+        local eff_name eff_email eff_sign remote_url
+        eff_name=$(git config user.name 2>/dev/null || echo "")
+        eff_email=$(git config user.email 2>/dev/null || echo "")
+        eff_sign=$(git config user.signingkey 2>/dev/null || echo "")
+        remote_url=$(git config --get remote.origin.url 2>/dev/null || echo "")
+        echo -e "  \033[0;32m[PASS] Inside Git repository: $(pwd)\033[0m"
+        echo -e "         Active User Name  : $eff_name"
+        echo -e "         Active User Email : $eff_email"
+        if [[ -n "$eff_sign" ]]; then
+            echo -e "         Active Signing Key: $eff_sign"
+        fi
+        if [[ -n "$remote_url" ]]; then
+            echo -e "         Remote Origin URL : $remote_url"
+            case "$remote_url" in
+                git@github.com:*|ssh://*)
+                    echo -e "  \033[1;33m[WARN] Repository uses SSH remote ($remote_url).\033[0m"
+                    echo -e "         Git credential helper is bypassed for SSH transport."
+                    echo -e "         To enable HTTPS token switching: git remote set-url origin https://github.com/<org>/<repo>.git"
+                    ((warn_count++)) || true
+                    ;;
+                *)
+                    echo -e "  \033[0;32m[PASS] Remote uses HTTPS transport (credential helper active)\033[0m"
+                    ;;
+            esac
+        fi
+    else
+        echo -e "  [INFO] Current directory is not a Git repository."
+    fi
+
+    echo ""
+    echo "============================================================"
+    if [[ $issue_count -eq 0 && $warn_count -eq 0 ]]; then
+        echo -e "  \033[0;32mDOCTOR RESULT: ALL CHECKS PASSED [OK]\033[0m"
+    elif [[ $issue_count -eq 0 ]]; then
+        echo -e "  \033[1;33mDOCTOR RESULT: $warn_count WARNING(S) FOUND (SYSTEM OPERATIONAL)\033[0m"
+    else
+        echo -e "  \033[0;31mDOCTOR RESULT: $issue_count ISSUE(S), $warn_count WARNING(S) FOUND\033[0m"
+    fi
+    echo "============================================================"
+    echo ""
+}
+
 show_help() {
     echo ""
     echo "============================================================"
@@ -601,6 +853,7 @@ show_help() {
     echo "  gswitch                             Open interactive account selection menu"
     echo "  gswitch status | who                View active GitHub token & Git identities"
     echo "  gswitch list | ls                   List all configured account profiles with aliases"
+    echo "  gswitch doctor | check              Run system & repository diagnostic health checks"
     echo "  gswitch alias [acc] [shortcut]      Add or view shortcut aliases for quick switching"
     echo "  gswitch unalias [acc] [alias]       Remove a shortcut alias from an account profile"
     echo "  gswitch bind [dir] [account]        Permanently bind an entire folder to an account"
@@ -620,6 +873,7 @@ show_help() {
     echo "  bind     Bind a directory to an account (includeIf): gswitch bind <dir> <account>"
     echo "  unbind   Remove a folder binding: gswitch unbind <dir>"
     echo "  bindings List all active directory bindings configured on system"
+    echo "  doctor   Run complete self-diagnostics on Git, GitHub CLI, tokens, bindings, and remotes"
     echo "  edit     Open accounts.json directly in VS Code / default editor"
     echo "  remove   Remove a profile by key, user, alias, or index: gswitch remove <key> [-f]"
     echo "  sync     Scan 'gh auth status', fetch IDs, and configure private noreply emails"
@@ -684,6 +938,7 @@ switch_account() {
     local name="$3"
     local email="$4"
     local is_local="$5"
+    local signingkey="$6"
 
     echo ""
     echo -e "\033[1;33m>> Switching to account: [$label] ($username)...\033[0m"
@@ -693,21 +948,73 @@ switch_account() {
         exit 1
     fi
 
+    local is_repo
+    is_repo=$(git rev-parse --is-inside-work-tree 2>/dev/null || echo "false")
+
     if [[ "$is_local" == "true" ]]; then
-        if [[ $(git rev-parse --is-inside-work-tree 2>/dev/null) != "true" ]]; then
+        if [[ "$is_repo" != "true" ]]; then
             echo -e "\033[0;31m[ERROR] Current directory is not a Git repository.\033[0m"
             exit 1
         fi
         git config --local user.name "$name"
         git config --local user.email "$email"
+        git config --local credential.https://github.com.username "$username"
+        git config --local --unset-all credential.https://github.com.helper 2>/dev/null || true
+        git config --local --add credential.https://github.com.helper "!git-account-switcher cred $username"
+        git config --local credential.https://gist.github.com.username "$username"
+        git config --local --unset-all credential.https://gist.github.com.helper 2>/dev/null || true
+        git config --local --add credential.https://gist.github.com.helper "!git-account-switcher cred $username"
+
+        if [[ -n "$signingkey" ]]; then
+            git config --local user.signingkey "$signingkey"
+            git config --local commit.gpgsign true
+            [[ "$signingkey" =~ ^(ssh-|key::) ]] && git config --local gpg.format ssh
+            echo -e "\033[0;32m[OK] Git signingkey (LOCAL) : $signingkey\033[0m"
+        else
+            git config --local --unset-all user.signingkey 2>/dev/null || true
+            git config --local --unset-all commit.gpgsign 2>/dev/null || true
+            git config --local --unset-all gpg.format 2>/dev/null || true
+        fi
+
         echo -e "\033[0;32m[OK] GitHub CLI switched to : $username\033[0m"
         echo -e "\033[0;32m[OK] Git user.name (LOCAL)  : $name\033[0m"
         echo -e "\033[0;32m[OK] Git user.email (LOCAL) : $email\033[0m"
+        echo -e "\033[0;32m[OK] Git cred helper (LOCAL): !git-account-switcher cred $username\033[0m"
         echo ""
-        echo -e "\033[0;36m=> Applied locally to this repository only!\033[0m"
+        echo -e "\033[0;36m=> Applied locally with isolated push permissions for this repository only!\033[0m"
     else
+        if [[ "$is_repo" == "true" ]]; then
+            local has_local_name has_local_cred has_local_sign
+            has_local_name=$(git config --local user.name 2>/dev/null || true)
+            has_local_cred=$(git config --local credential.https://github.com.username 2>/dev/null || true)
+            has_local_sign=$(git config --local user.signingkey 2>/dev/null || true)
+            if [[ -n "$has_local_name" || -n "$has_local_cred" || -n "$has_local_sign" ]]; then
+                git config --local --unset-all user.name 2>/dev/null || true
+                git config --local --unset-all user.email 2>/dev/null || true
+                git config --local --unset-all credential.https://github.com.username 2>/dev/null || true
+                git config --local --unset-all credential.https://github.com.helper 2>/dev/null || true
+                git config --local --unset-all credential.https://gist.github.com.username 2>/dev/null || true
+                git config --local --unset-all credential.https://gist.github.com.helper 2>/dev/null || true
+                git config --local --unset-all user.signingkey 2>/dev/null || true
+                git config --local --unset-all commit.gpgsign 2>/dev/null || true
+                git config --local --unset-all gpg.format 2>/dev/null || true
+                echo -e "\033[1;33m[INFO] Cleared repository-local overrides in current repository.\033[0m"
+            fi
+        fi
+
         git config --global user.name "$name"
         git config --global user.email "$email"
+        if [[ -n "$signingkey" ]]; then
+            git config --global user.signingkey "$signingkey"
+            git config --global commit.gpgsign true
+            [[ "$signingkey" =~ ^(ssh-|key::) ]] && git config --global gpg.format ssh
+            echo -e "\033[0;32m[OK] Git signingkey (GLOBAL): $signingkey\033[0m"
+        else
+            git config --global --unset-all user.signingkey 2>/dev/null || true
+            git config --global --unset-all commit.gpgsign 2>/dev/null || true
+            git config --global --unset-all gpg.format 2>/dev/null || true
+        fi
+
         echo -e "\033[0;32m[OK] GitHub CLI switched to : $username\033[0m"
         echo -e "\033[0;32m[OK] Git user.name (GLOBAL) : $name\033[0m"
         echo -e "\033[0;32m[OK] Git user.email (GLOBAL): $email\033[0m"
@@ -733,6 +1040,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         status|who|current|-s)
             show_status
+            exit 0
+            ;;
+        doctor|check|diag|diagnose)
+            doctor
             exit 0
             ;;
         list|ls)
@@ -852,7 +1163,7 @@ with open('$CONFIG_FILE') as f:
 for a in data:
     aliases = [str(x).lower() for x in a.get('aliases', [])]
     if str(a.get('index')) == q or a.get('key','').lower() == q or a.get('username','').lower() == q or q in aliases:
-        print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\")
+        print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\t{a.get('signingkey') or ''}\")
         sys.exit(0)
 
 # 2. Fuzzy match
@@ -860,13 +1171,13 @@ for a in data:
     u = a.get('username','').lower()
     k = a.get('key','').lower()
     if q in u or u in q or q in k or k in q:
-        print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\")
+        print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\t{a.get('signingkey') or ''}\")
         sys.exit(0)
 " "$TARGET" 2>/dev/null || true)
 
 if [[ -n "$SELECTED" ]]; then
-    IFS=$'\t' read -r S_LABEL S_USER S_NAME S_EMAIL <<< "$SELECTED"
-    switch_account "$S_LABEL" "$S_USER" "$S_NAME" "$S_EMAIL" "$APPLY_LOCAL"
+    IFS=$'\t' read -r S_LABEL S_USER S_NAME S_EMAIL S_SIGNKEY <<< "$SELECTED"
+    switch_account "$S_LABEL" "$S_USER" "$S_NAME" "$S_EMAIL" "$APPLY_LOCAL" "$S_SIGNKEY"
 else
     echo -e "\033[0;31m[ERROR] Account '$TARGET' not found. Run 'gswitch list', 'gswitch add', or 'gswitch sync'.\033[0m"
     exit 1

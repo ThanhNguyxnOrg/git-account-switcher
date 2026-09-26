@@ -45,9 +45,14 @@ Assert-Test "PowerShell Script Syntax Validation" {
     }
 }
 
+function Invoke-Gswitch {
+    param([Parameter(ValueFromRemainingArguments)]$ArgsList)
+    & powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File $SwitcherPs1 @ArgsList 2>&1
+}
+
 # 2. Help Command Check
 Assert-Test "Help flag execution ('help')" {
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 help 2>&1
+    $output = Invoke-Gswitch help
     $outStr = ($output | Out-String)
     if ($LASTEXITCODE -ne 0) {
         throw "Expected exit code 0, got $LASTEXITCODE"
@@ -66,7 +71,7 @@ try {
     $env:GIT_ACCOUNT_SWITCHER_CONFIG = $sandboxConfig
 
     Assert-Test "Empty config list handling" {
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 list 2>&1
+        $out = Invoke-Gswitch list
         $outStr = ($out | Out-String)
         if ($outStr -notmatch "No account profiles configured yet") {
             throw "Expected empty profile notice, got: $outStr"
@@ -74,7 +79,7 @@ try {
     }
 
     Assert-Test "Add profile non-interactively ('add octocat work')" {
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 add octocat work "Mona Lisa" "mona@enterprise.com" 2>&1
+        $out = Invoke-Gswitch add octocat work "Mona Lisa" "mona@enterprise.com"
         if (-not (Test-Path $sandboxConfig)) {
             throw "Sandbox config was not created at $sandboxConfig"
         }
@@ -86,7 +91,7 @@ try {
     }
 
     Assert-Test "Add second profile ('add student-mona school')" {
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 add student-mona school "Mona Student" "mona@school.edu" 2>&1
+        $out = Invoke-Gswitch add student-mona school "Mona Student" "mona@school.edu"
         $raw = Get-Content -Path $sandboxConfig -Raw
         $json = $raw | ConvertFrom-Json
         if ($json.Count -ne 2) {
@@ -94,21 +99,8 @@ try {
         }
     }
 
-    Assert-Test "Update existing profile without duplicate key/user" {
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 add octocat work "Mona Updated" "mona.new@enterprise.com" 2>&1
-        $raw = Get-Content -Path $sandboxConfig -Raw
-        $json = $raw | ConvertFrom-Json
-        if ($json.Count -ne 2) {
-            throw "Expected 2 accounts after update, found $($json.Count) (duplicates were created)"
-        }
-        $workAcc = $json | Where-Object { $_.key -eq "work" }
-        if ($workAcc.name -ne "Mona Updated") {
-            throw "Account was not updated with new author name."
-        }
-    }
-
     Assert-Test "Add shortcut alias ('alias work w')" {
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 alias work w 2>&1
+        $out = Invoke-Gswitch alias work w
         $raw = Get-Content -Path $sandboxConfig -Raw
         $json = $raw | ConvertFrom-Json
         $workAcc = $json | Where-Object { $_.key -eq "work" }
@@ -118,8 +110,25 @@ try {
         }
     }
 
+    Assert-Test "Update existing profile preserves custom aliases" {
+        $out = Invoke-Gswitch add octocat work "Mona Updated" "mona.new@enterprise.com"
+        $raw = Get-Content -Path $sandboxConfig -Raw
+        $json = $raw | ConvertFrom-Json
+        if ($json.Count -ne 2) {
+            throw "Expected 2 accounts after update, found $($json.Count) (duplicates were created)"
+        }
+        $workAcc = $json | Where-Object { $_.key -eq "work" }
+        if ($workAcc.name -ne "Mona Updated") {
+            throw "Account was not updated with new author name."
+        }
+        $aliases = @($workAcc.aliases | ForEach-Object { $_.ToString().ToLower() })
+        if ($aliases -notcontains "w") {
+            throw "Custom alias 'w' was wiped out upon updating profile! Found: $($aliases -join ', ')"
+        }
+    }
+
     Assert-Test "Remove shortcut alias ('unalias work w')" {
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 unalias work w 2>&1
+        $out = Invoke-Gswitch unalias work w
         $raw = Get-Content -Path $sandboxConfig -Raw
         $json = $raw | ConvertFrom-Json
         $workAcc = $json | Where-Object { $_.key -eq "work" }
@@ -129,23 +138,72 @@ try {
         }
     }
 
-    Assert-Test "Remove profile ('remove school -f')" {
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 remove school -f 2>&1
+    Assert-Test "Remove profile and verify clean re-indexing ('remove work -f')" {
+        # Profile 1 is work, Profile 2 is school. Remove work: school becomes Profile 1.
+        $out = Invoke-Gswitch remove work -f
         $raw = Get-Content -Path $sandboxConfig -Raw
         $json = $raw | ConvertFrom-Json
         if ($json.Count -ne 1) {
             throw "Expected 1 account remaining, found $($json.Count)"
         }
-        if ($json[0].key -ne "work") {
-            throw "Remaining account was not 'work'."
+        if ($json[0].key -ne "school") {
+            throw "Remaining account was not 'school'."
+        }
+        if ($json[0].index -ne 1) {
+            throw "Expected remaining account index to be 1, found $($json[0].index)"
+        }
+        $aliases = @($json[0].aliases | ForEach-Object { $_.ToString() })
+        if ($aliases -contains "2") {
+            throw "Old index '2' was not purged from aliases! Aliases: $($aliases -join ', ')"
+        }
+        if ($aliases -notcontains "1") {
+            throw "New index '1' was not added to aliases! Aliases: $($aliases -join ', ')"
         }
     }
 
     Assert-Test "List folder bindings command ('bindings')" {
-        $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $SwitcherPs1 bindings 2>&1
+        $out = Invoke-Gswitch bindings
         $outStr = ($out | Out-String)
         if ($outStr -notmatch "Configured Folder Bindings") {
             throw "Expected bindings output, got: $outStr"
+        }
+    }
+
+    Assert-Test "Credential helper command ('cred <user> get')" {
+        $out = Invoke-Gswitch cred non_existent_user_test get
+        $outStr = ($out | Out-String)
+        # Should exit 0 without crashing
+        if ($LASTEXITCODE -ne 0) {
+            throw "Expected exit code 0 for cred command, got: $LASTEXITCODE"
+        }
+    }
+
+    Assert-Test "Diagnostics command ('doctor')" {
+        $out = Invoke-Gswitch doctor
+        $outStr = ($out | Out-String)
+        if ($outStr -notmatch "GIT ACCOUNT SWITCHER - SYSTEM & REPO DIAGNOSTICS") {
+            throw "Expected doctor diagnostic header, got: $outStr"
+        }
+        if ($outStr -notmatch "DOCTOR RESULT:") {
+            throw "Expected doctor result section, got: $outStr"
+        }
+    }
+
+    Assert-Test "SSH Remote Warning in Status" {
+        $dummyRepo = Join-Path $sandboxDir "dummy-ssh-repo"
+        New-Item -ItemType Directory -Path $dummyRepo -Force | Out-Null
+        Push-Location $dummyRepo
+        try {
+            git init -q
+            git remote add origin "git@github.com:dummy/ssh-repo.git"
+            $out = Invoke-Gswitch status
+            $outStr = ($out | Out-String)
+            if ($outStr -notmatch "Remote uses SSH") {
+                throw "Expected SSH remote warning, got: $outStr"
+            }
+        } finally {
+            Pop-Location
+            Remove-Item -Path $dummyRepo -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 

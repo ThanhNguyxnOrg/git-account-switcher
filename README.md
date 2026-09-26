@@ -104,6 +104,7 @@ git who               # Check who is currently active
 | `gswitch` | | Open interactive numbered selection menu |
 | `gswitch status` | `gswitch current`, `git who` | Inspect active GitHub token, global identity, and local repo override |
 | `gswitch list` | `gswitch ls` | List all profiles with active status and assigned shortcut aliases |
+| `gswitch doctor` | `gswitch check` | Run complete self-diagnostics on Git, GitHub CLI, tokens, bindings, and remotes |
 | `gswitch alias <acc> <new>`| | Assign a new shortcut alias (e.g. `gswitch alias work w`) |
 | `gswitch bind <dir> <acc>`| `gswitch folder` | Permanently bind an entire folder/dir to an account (`includeIf`) |
 | `gswitch unbind <dir>` | `gswitch unlink` | Remove a folder-to-account binding |

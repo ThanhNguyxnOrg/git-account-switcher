@@ -86,10 +86,34 @@ test_remove_alias() {
 }
 
 test_remove_profile() {
+    # Remove school, work remains as #1
     "$SWITCHER" remove school -f >/dev/null 2>&1
     local count
     count=$(grep -c '"key"' "$SANDBOX_CONFIG" || echo "0")
-    [[ "$count" -eq 1 ]] && grep -q '"work"' "$SANDBOX_CONFIG"
+    [[ "$count" -eq 1 ]] && grep -q '"work"' "$SANDBOX_CONFIG" && grep -q '"1"' "$SANDBOX_CONFIG"
+}
+
+test_cred() {
+    "$SWITCHER" cred non_existent_user get >/dev/null 2>&1 || true
+}
+
+test_doctor() {
+    local out
+    out=$("$SWITCHER" doctor 2>&1)
+    [[ "$out" == *"GIT ACCOUNT SWITCHER - SYSTEM & REPO DIAGNOSTICS"* && "$out" == *"DOCTOR RESULT:"* ]]
+}
+
+test_ssh_warning() {
+    local dummy_repo="$SANDBOX_DIR/dummy-ssh"
+    mkdir -p "$dummy_repo"
+    (
+        cd "$dummy_repo"
+        git init -q
+        git remote add origin "git@github.com:dummy/ssh-repo.git"
+        local out
+        out=$("$SWITCHER" status 2>&1)
+        [[ "$out" == *"Remote uses SSH"* ]]
+    )
 }
 
 test_bindings() {
@@ -106,8 +130,11 @@ assert_test "Add second profile ('add student-mona school')" test_add_second
 assert_test "Update existing profile without duplicates" test_update_existing
 assert_test "Add shortcut alias ('alias work w')" test_add_alias
 assert_test "Remove shortcut alias ('unalias work w')" test_remove_alias
-assert_test "Remove profile ('remove school -f')" test_remove_profile
+assert_test "Remove profile and clean reindex ('remove school -f')" test_remove_profile
 assert_test "List folder bindings command ('bindings')" test_bindings
+assert_test "Credential helper command ('cred <user> get')" test_cred
+assert_test "Diagnostics command ('doctor')" test_doctor
+assert_test "SSH Remote Warning in Status" test_ssh_warning
 
 echo ""
 echo "============================================================"
