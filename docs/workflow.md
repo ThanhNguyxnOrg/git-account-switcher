@@ -169,7 +169,7 @@ gswitch unbind C:\Projects\Work
 
 ---
 
-## Phase 5: Verification & Safety
+## Phase 5: Verification & Diagnostics
 
 Always verify your active identity before making your first commit in a session:
 
@@ -193,6 +193,13 @@ Example output:
  Git Local Name    : Mona Corporate
  Git Local Email   : mona@enterprise.com
 ============================================================
+```
+
+### Run Self-Diagnostics
+To verify Git versions, token validity, folder bindings, and active repository remote URLs (such as catching SSH remote bypasses):
+
+```bash
+gswitch doctor
 ```
 
 Test commit and push:

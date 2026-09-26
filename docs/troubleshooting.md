@@ -5,13 +5,34 @@ This document covers common questions, edge cases, and troubleshooting steps whe
 ---
 
 ## 📑 Table of Contents
-1. [Windows Credential Manager (GCM) Conflict](#windows-credential-manager-gcm-conflict)
-2. [Resolving 403 Forbidden on Git Push](#resolving-403-forbidden-on-git-push)
-3. [Fixing Past Commits with Wrong Author](#fixing-past-commits-with-wrong-author)
-4. [GitHub Email Privacy: "Push rejected due to email privacy"](#github-email-privacy-push-rejected-due-to-email-privacy)
-5. [PowerShell ExecutionPolicy Restriction on Windows](#powershell-executionpolicy-restriction-on-windows)
-6. [Switching Back to Default Identity](#switching-back-to-default-identity)
-7. [Running Self-Tests](#running-self-tests)
+1. [First Step: Run System Diagnostics (`gswitch doctor`)](#first-step-run-system-diagnostics-gswitch-doctor)
+2. [Windows Credential Manager (GCM) Conflict](#windows-credential-manager-gcm-conflict)
+3. [SSH Remote Bypass: Why Push Fails Despite Switching Accounts](#ssh-remote-bypass-why-push-fails-despite-switching-accounts)
+4. [Resolving 403 Forbidden on Git Push](#resolving-403-forbidden-on-git-push)
+5. [Fixing Past Commits with Wrong Author](#fixing-past-commits-with-wrong-author)
+6. [GitHub Email Privacy: "Push rejected due to email privacy"](#github-email-privacy-push-rejected-due-to-email-privacy)
+7. [PowerShell ExecutionPolicy Restriction on Windows](#powershell-executionpolicy-restriction-on-windows)
+8. [Switching Back to Default Identity](#switching-back-to-default-identity)
+9. [Running Self-Tests](#running-self-tests)
+
+---
+
+## First Step: Run System Diagnostics (`gswitch doctor`)
+
+Whenever you encounter unexpected behavior with switching, permissions, or git push, run the built-in self-diagnostics first:
+
+```bash
+gswitch doctor
+# Shorthand:
+gswitch check
+```
+
+`gswitch doctor` executes 5 automated health checks:
+1. **Git Installation & Minimum Version:** Verifies Git >= 2.13.
+2. **GitHub CLI (`gh`) & Authentication:** Verifies `gh` CLI version and logged-in accounts.
+3. **Token Health & Account Verification:** Validates your OAuth tokens against GitHub's API (`gh api user`).
+4. **Folder Binding Integrity:** Checks `includeIf` rules and generated profile configs.
+5. **Active Repository Context:** If inside a Git repository, inspects remote URLs (detecting SSH bypass), local author overrides, and repository-specific credential helpers.
 
 ---
 
@@ -23,25 +44,60 @@ You switched accounts with `gswitch work`, but `git push` fails with a permissio
 ### Why It Happens
 On Windows, Git Credential Manager (GCM) can aggressively cache OAuth credentials in the Windows Credential Store (`Generic Credentials`), overriding GitHub CLI's helper.
 
-### The Fix
-Configure Git to prioritize GitHub CLI as the credential helper:
+### The Solution: Dynamic Credential Bridge
+`git-account-switcher` includes a built-in dynamic credential bridge:
+- When using **Folder Bindings** (`gswitch bind`), each bound directory automatically injects:
+  ```text
+  credential.https://github.com.helper = !git-account-switcher cred <username>
+  ```
+- When using **Local Switching** (`gswitch -l <account>`), the same helper is written directly to `.git/config`.
+
+This instructs Git to request the token directly from GitHub CLI for that specific username, completely bypassing GCM token poisoning!
+
+If you switch globally without folder bindings or `-l`, configure Git to ask GitHub CLI:
 
 ```bash
 gh auth setup-git
 ```
 
-Or configure it manually in your global Git config:
-```bash
-git config --global credential.helper ""
-git config --global --add credential.helper "!gh auth git-credential"
-```
-
-If old tokens persist, clear them from the Windows Credential Manager:
+If old tokens persist in Windows Credential Store:
 1. Press `Win + S` and type **Credential Manager**.
 2. Select **Windows Credentials**.
 3. Under **Generic Credentials**, find entries for `git:https://github.com` or `GitHub - https://api.github.com`.
 4. Click **Remove**.
 5. Run `gswitch <your-account>` and retry.
+
+---
+
+## SSH Remote Bypass: Why Push Fails Despite Switching Accounts
+
+### The Symptom
+You switched to Account B via `gswitch`, but `git push` fails with:
+```text
+ERROR: Permission to org/repo.git denied to user-a.
+fatal: Could not read from remote repository.
+```
+
+### Why It Happens
+Your repository remote is configured with an **SSH URL**:
+```text
+origin  git@github.com:org/repo.git (push)
+```
+Git credential helpers and GitHub CLI OAuth tokens **only apply to HTTPS remotes**. When using SSH, Git uses your local SSH keys (`~/.ssh/id_rsa` or `~/.ssh/id_ed25519`), completely bypassing `gswitch` and GitHub CLI authentication!
+
+### The Fix: Switch Remote to HTTPS
+Convert your repository remote to HTTPS so `gswitch`'s dynamic token bridge manages authentication:
+
+```bash
+# 1. Switch remote URL to HTTPS:
+git remote set-url origin https://github.com/org/repo.git
+
+# 2. Verify with gswitch doctor:
+gswitch doctor
+
+# 3. Push seamlessly:
+git push
+```
 
 ---
 
@@ -57,23 +113,19 @@ fatal: unable to access 'https://github.com/org/repo.git/': The requested URL re
 Your active GitHub token belongs to Account A, but the repository belongs to Account B or an organization requiring Account B.
 
 ### Fix
-1. Inspect your current active accounts:
+1. Run diagnostics to spot the mismatch:
    ```bash
-   git who
+   gswitch doctor
    ```
 2. Switch to the account that owns or has write permissions on the repository:
    ```bash
    gswitch work
    ```
-3. If inside a specific repository, make sure no conflicting local override exists:
-   ```bash
-   git config --local --unset user.name
-   git config --local --unset user.email
-   ```
-   Or apply the correct account locally:
+3. To permanently isolate push permissions for this specific repository without touching global settings:
    ```bash
    gswitch -l work
    ```
+   *This configures both local Git commit authorship (`user.name`/`user.email`) and isolates push authentication via `credential.https://github.com.helper "!git-account-switcher cred work"` in `.git/config`.*
 
 ---
 

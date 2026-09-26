@@ -36,6 +36,7 @@ gswitch edit
     "username": "octocat",
     "name": "Mona Lisa",
     "email": "583231+octocat@users.noreply.github.com",
+    "signingkey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI...",
     "description": "Personal open source & side projects"
   }
 ]
@@ -52,6 +53,7 @@ gswitch edit
 | `username` | String | Exact GitHub handle used for authentication (`gh auth switch -u <username>`). |
 | `name` | String | Git author name stamped on commits (`git config user.name "<name>"`). |
 | `email` | String | Git author email stamped on commits (`git config user.email "<email>"`). |
+| `signingkey` | String | *(Optional)* GPG Key ID or SSH Public Key used to sign commits (`commit.gpgsign = true`). |
 | `description` | String | Optional note explaining the role of this account profile. |
 
 ---
@@ -206,7 +208,7 @@ gswitch bind ~/projects/work work
 ```
 
 *What happens under the hood:*  
-`gswitch` automatically creates `~/.gitconfig-<key>` with the account's name and noreply email, then registers a case-insensitive `[includeIf "gitdir/i:<folder>/**"]` entry inside your global `~/.gitconfig`. Every repository inside that folder will instantly commit under that identity without typing any switch command!
+`gswitch` automatically creates `~/.gitconfig-<key>` with the account's name, noreply email, and a dynamic credential helper (`credential.https://github.com.helper "!git-account-switcher cred <username>"`). It then registers a case-insensitive `[includeIf "gitdir/i:<folder>/**"]` entry inside your global `~/.gitconfig`. Every repository inside that folder will instantly commit and push under that identity without typing any switch command!
 
 > 💡 **Checking Identity Inside a Bound Folder:**  
 > Run `git who` (or `gswitch status`) inside any repository within the bound directory to verify. `gswitch` will detect the `includeIf` rule and report:
@@ -214,6 +216,7 @@ gswitch bind ~/projects/work work
 > [Folder Override via includeIf detected]
 > Git Folder Name   : Mona Corporate
 > Git Folder Email  : mona@enterprise.com
+> Push Credential   : mona-corp (dynamic credential bridge)
 > ```
 
 ### 2. Inspect All Active Folder Bindings
@@ -226,8 +229,8 @@ gswitch bindings
 gswitch unbind C:\Projects\Work
 ```
 
-> **Why you still use `gswitch` for GitHub CLI:**  
-> While folder binding automatically locks Git's commit authorship inside that folder, running `gswitch <key>` or `gswitch` synchronizes your active GitHub CLI push token (`gh auth switch`) when pushing over HTTPS, submitting PRs, or managing issues.
+> [!NOTE]
+> **Push Token Isolation:** Thanks to the built-in credential bridge, `git push` inside bound folders automatically uses the correct GitHub token without manual switching. Global switching (`gswitch <key>`) is only needed when using standalone GitHub CLI commands (`gh pr create`, `gh issue`, etc.).
 
 ---
 
