@@ -147,6 +147,8 @@ Before completing your response to the user, run these non-destructive checks:
 | **Expired Token** | `gh api` returns 401 Unauthorized | Run `gh auth refresh -h github.com`. |
 | **Repository-Local Work** | User only wants to change email for 1 repo | Instruct the user to run `cd <repo> && gswitch -l <key>`. |
 | **Folder-Specific Separation** | User wants all repos in a folder bound to one account | Run `gswitch bind <dir> <account>` (Optional set-and-forget power feature). |
+| **Updating / Upgrading** | User wants latest features or bugfixes | Run `gswitch update` or 1-line update script (`update.ps1` / `update.sh`). |
+| **Tab Auto-Completion** | User wants Tab auto-completion | Run `gswitch completion install` to configure their shell profile. |
 
 ---
 

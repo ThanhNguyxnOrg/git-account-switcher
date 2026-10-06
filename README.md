@@ -114,6 +114,9 @@ git who               # Check who is currently active
 | `gswitch setup` | `gswitch init` | Run the guided first-time interactive setup wizard |
 | `gswitch add` | | Add or update an account profile interactively |
 | `gswitch remove <acc>` | `gswitch rm` | Remove an account profile (supports index, key, user, or alias) |
+| `gswitch update` | `gswitch upgrade` | Download and install the latest release of git-account-switcher |
+| `gswitch version` | `gswitch -v` | Display installed version |
+| `gswitch completion`| | Install or output shell tab auto-completion (`gswitch completion install`) |
 | `gswitch help` | `gswitch -h` | Display help reference and usage examples |
 
 ---
@@ -199,6 +202,29 @@ gswitch unbind C:\Projects\Work
 - ❓ **[Troubleshooting & FAQ](docs/troubleshooting.md)**: Resolving Windows Credential Manager caching, 403 Forbidden, and detached commits.
 - 🤖 **[Autonomous AI Agent Protocol](AGENT.md)**: Prompt instructions for AI tools (Cursor, Claude, Copilot, Antigravity) to manage accounts.
 - 🤝 **[Contributing & Testing](CONTRIBUTING.md)**: Local development setup, test suite execution, and PR guidelines.
+
+---
+
+## 🔄 Updating / Upgrading
+
+Keep `git-account-switcher` up to date with the latest bugfixes and features. All existing user accounts, credentials, and folder bindings are safely preserved.
+
+### Via CLI Command (Fastest):
+```bash
+gswitch update
+gswitch version  # check installed version
+```
+
+### Via 1-Line Self-Update Command:
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/update.ps1 | iex
+```
+
+**macOS & Linux (Bash / Zsh):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/update.sh | bash
+```
 
 ---
 

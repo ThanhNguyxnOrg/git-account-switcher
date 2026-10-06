@@ -46,8 +46,7 @@ Assert-Test "PowerShell Script Syntax Validation" {
 }
 
 function Invoke-Gswitch {
-    param([Parameter(ValueFromRemainingArguments)]$ArgsList)
-    & powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File $SwitcherPs1 @ArgsList 2>&1
+    & powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File $SwitcherPs1 @args 2>&1
 }
 
 # 2. Help Command Check
@@ -62,7 +61,39 @@ Assert-Test "Help flag execution ('help')" {
     }
 }
 
-# 3. Isolated Sandbox Integration Tests
+# 3. Version Command Check
+Assert-Test "Version command execution ('version' & '-v')" {
+    $output1 = Invoke-Gswitch version
+    $outStr1 = ($output1 | Out-String)
+    if ($outStr1 -notmatch "v1\.2\.0") {
+        throw "Expected version v1.2.0, got: $outStr1"
+    }
+    $output2 = Invoke-Gswitch -v
+    $outStr2 = ($output2 | Out-String)
+    if ($outStr2 -notmatch "v1\.2\.0") {
+        throw "Expected version v1.2.0, got: $outStr2"
+    }
+}
+
+# 4. Update Command Check
+Assert-Test "Update command execution ('update')" {
+    $out = Invoke-Gswitch update
+    $outStr = ($out | Out-String)
+    if ($outStr -notmatch "Updating git-account-switcher" -or $outStr -notmatch "updated successfully") {
+        throw "Expected update output, got: $outStr"
+    }
+}
+
+# 5. Shell Completion Script Check
+Assert-Test "Shell completion script generator ('completion powershell')" {
+    $out = Invoke-Gswitch completion powershell
+    $outStr = ($out | Out-String)
+    if ($outStr -notmatch "Register-ArgumentCompleter") {
+        throw "Expected Register-ArgumentCompleter in completion script, got: $outStr"
+    }
+}
+
+# 6. Isolated Sandbox Integration Tests
 $sandboxDir = Join-Path ([System.IO.Path]::GetTempPath()) ("gswitch_test_" + [System.Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $sandboxDir -Force | Out-Null
 $sandboxConfig = Join-Path $sandboxDir "accounts.json"
@@ -166,6 +197,67 @@ try {
         $outStr = ($out | Out-String)
         if ($outStr -notmatch "Configured Folder Bindings") {
             throw "Expected bindings output, got: $outStr"
+        }
+    }
+
+    Assert-Test "End-to-End Folder Binding & Inheritance ('bind' & 'unbind')" {
+        $testBoundDir = Join-Path $sandboxDir "bound_work_dir"
+        $subRepo = Join-Path $testBoundDir "sub_repo"
+        New-Item -ItemType Directory -Path $subRepo -Force | Out-Null
+        $isolatedCfgFile = "$HOME\.gitconfig-testisolatedkey"
+        try {
+            # Add an isolated account for testing folder binding
+            Invoke-Gswitch add mockuser testisolatedkey "Mock Author" "mock@author.org" | Out-Null
+
+            # Bind the folder to testisolatedkey
+            $bindOut = Invoke-Gswitch bind $testBoundDir testisolatedkey
+            $bindStr = ($bindOut | Out-String)
+            if ($bindStr -notmatch "successfully bound to account") {
+                throw "Failed to bind folder. Output: $bindStr"
+            }
+
+            # Verify bindings listing shows the bound dir
+            $listOut = (Invoke-Gswitch bindings | Out-String)
+            if ($listOut -notmatch "bound_work_dir") {
+                throw "Folder was not found in 'bindings' output: $listOut"
+            }
+
+            # Initialize git repo inside bound dir and verify author inheritance
+            Push-Location $subRepo
+            try {
+                git init -q
+                $effName = git config user.name
+                $effEmail = git config user.email
+                if ($effName -ne "Mock Author" -or $effEmail -ne "mock@author.org") {
+                    throw "Sub-repo did not inherit folder binding identity! Got: name='$effName', email='$effEmail'"
+                }
+
+                # Verify gswitch status detects folder binding
+                $statusOut = (Invoke-Gswitch status | Out-String)
+                if ($statusOut -notmatch "Folder includeIf Binding Active") {
+                    throw "Status did not report active folder binding: $statusOut"
+                }
+
+                # Test local override shadowing warning
+                git config --local user.name "OverrideAuthor"
+                $shadowOut = (Invoke-Gswitch status | Out-String)
+                if ($shadowOut -notmatch "SHADOWED by this local override") {
+                    throw "Status failed to warn that local override shadows folder binding: $shadowOut"
+                }
+            } finally {
+                Pop-Location
+            }
+
+            # Unbind the folder
+            $unbindOut = (Invoke-Gswitch unbind $testBoundDir | Out-String)
+            if ($unbindOut -notmatch "Unbound folder") {
+                throw "Failed to unbind folder: $unbindOut"
+            }
+        } finally {
+            # Ensure unbind cleanup
+            Invoke-Gswitch unbind $testBoundDir 2>$null | Out-Null
+            Remove-Item -Path $testBoundDir -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $isolatedCfgFile -Force -ErrorAction SilentlyContinue
         }
     }
 

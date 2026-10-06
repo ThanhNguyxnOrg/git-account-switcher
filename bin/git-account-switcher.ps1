@@ -31,10 +31,15 @@ param(
     [switch]$Global,
     [switch]$Force,
     [Alias("h")]
-    [switch]$Help
+    [switch]$Help,
+    [Alias("v")]
+    [switch]$Version
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+$SCRIPT_VERSION = "1.2.0"
+$RAW_REPO_BASE  = "https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master"
 
 $ConfigFile = if ($env:GIT_ACCOUNT_SWITCHER_CONFIG) { $env:GIT_ACCOUNT_SWITCHER_CONFIG } else { "$HOME\.config\git-account-switcher\accounts.json" }
 $ConfigDir  = if ($ConfigFile) { [System.IO.Path]::GetDirectoryName($ConfigFile) } else { "$HOME\.config\git-account-switcher" }
@@ -169,11 +174,45 @@ function Show-Status {
         Write-Host " Git Signing Key   : " -NoNewline; Write-Host "$effectiveSign" -ForegroundColor Green
     }
 
+    # Check if current directory matches any configured folder binding
+    $currPath = (Get-Location).Path.Replace('\', '/').TrimEnd('/') + '/'
+    $matchedBinding = $null
+    $bindingLines = git config --global --list --show-origin 2>$null | Where-Object { $_ -match 'includeif\.gitdir' }
+    foreach ($bl in $bindingLines) {
+        if ($bl -match 'includeif\.gitdir(?:/i)?:(.*)\.path=(.*)') {
+            $boundPat = $matches[1]
+            $cfgTarget = $matches[2]
+            $cleanPat = $boundPat.TrimEnd('/') + '/'
+            if ($currPath.ToLower().StartsWith($cleanPat.ToLower())) {
+                $matchedBinding = [PSCustomObject]@{
+                    Pattern    = $boundPat
+                    ConfigFile = $cfgTarget
+                }
+                break
+            }
+        }
+    }
+
     if ($isRepo -and ($localName -or $localEmail)) {
         Write-Host " ------------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host " [Repo Local Override detected in current directory]" -ForegroundColor Yellow
         Write-Host " Git Local Name    : " -NoNewline; Write-Host "$localName" -ForegroundColor Yellow
         Write-Host " Git Local Email   : " -NoNewline; Write-Host "$localEmail" -ForegroundColor Yellow
+        if ($matchedBinding) {
+            Write-Host " [WARNING] Folder Binding active ($($matchedBinding.Pattern)) is currently SHADOWED by this local override!" -ForegroundColor Red
+            Write-Host "           To inherit the folder account, run: git config --local --unset-all user.name; git config --local --unset-all user.email" -ForegroundColor DarkYellow
+        }
+    } elseif ($matchedBinding) {
+        Write-Host " ------------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host " [Folder includeIf Binding Active in this directory]" -ForegroundColor Yellow
+        Write-Host " Bound Folder      : " -NoNewline; Write-Host "$($matchedBinding.Pattern)" -ForegroundColor DarkCyan
+        Write-Host " Effective Name    : " -NoNewline; Write-Host "$effectiveName" -ForegroundColor Green
+        Write-Host " Effective Email   : " -NoNewline; Write-Host "$effectiveEmail" -ForegroundColor Green
+        $boundUser = git config -f $matchedBinding.ConfigFile credential.https://github.com.username 2>$null
+        if ($boundUser -and $activeGh -ne "(none / not logged in)" -and $activeGh.ToLower() -ne $boundUser.ToLower()) {
+            Write-Host " [INFO] GitHub CLI is active as '$activeGh', while this folder commits/pushes as '$boundUser'." -ForegroundColor DarkYellow
+            Write-Host "        To switch GitHub CLI commands (gh pr, gh issue) to '$boundUser', run: gswitch $boundUser" -ForegroundColor DarkGray
+        }
     } elseif ($effectiveEmail -and ($effectiveEmail -ne $globalEmail -or $effectiveName -ne $globalName)) {
         Write-Host " ------------------------------------------------------------" -ForegroundColor DarkGray
         Write-Host " [Folder includeIf Binding Active in this directory]" -ForegroundColor Yellow
@@ -742,6 +781,54 @@ function Bind-FolderToAccount([string]$folderPath, [string]$targetAccount) {
     Write-Host "     Email   : $($match.Email)" -ForegroundColor Green
     Write-Host "     Username: $($match.Username) (auto-authenticated via gh token)" -ForegroundColor Green
     Write-Host ""
+
+    # 3. Check for existing repositories with local overrides inside $resolvedFolder
+    if (Test-Path $resolvedFolder) {
+        $reposWithLocalOverride = @()
+        $checkFolders = @()
+        if (Test-Path (Join-Path $resolvedFolder ".git")) {
+            $checkFolders += $resolvedFolder
+        } else {
+            try {
+                $subDirs = Get-ChildItem -Path $resolvedFolder -Directory -ErrorAction SilentlyContinue
+                foreach ($sd in $subDirs) {
+                    if (Test-Path (Join-Path $sd.FullName ".git")) {
+                        $checkFolders += $sd.FullName
+                    }
+                }
+            } catch {}
+        }
+        foreach ($r in $checkFolders) {
+            $locName = git -C $r config --local user.name 2>$null
+            $locEmail = git -C $r config --local user.email 2>$null
+            if ($locName -or $locEmail) {
+                $reposWithLocalOverride += [PSCustomObject]@{
+                    Path  = $r
+                    Name  = $locName
+                    Email = $locEmail
+                }
+            }
+        }
+        if ($reposWithLocalOverride.Count -gt 0) {
+            Write-Host "[NOTICE] Found $($reposWithLocalOverride.Count) repository(ies) with local (.git/config) overrides:" -ForegroundColor Yellow
+            foreach ($ro in $reposWithLocalOverride) {
+                Write-Host "  - $([System.IO.Path]::GetFileName($ro.Path)): user.name='$($ro.Name)', user.email='$($ro.Email)'" -ForegroundColor DarkYellow
+            }
+            Write-Host "  Local overrides take precedence over folder bindings in Git." -ForegroundColor DarkYellow
+            $cleanOverride = Read-Host "Would you like to clear local overrides in these repositories so they inherit '$($match.Label)'? [Y/n]"
+            if (-not $cleanOverride -or $cleanOverride -match '^[yY]$') {
+                foreach ($ro in $reposWithLocalOverride) {
+                    git -C $ro.Path config --local --unset-all user.name 2>$null
+                    git -C $ro.Path config --local --unset-all user.email 2>$null
+                    Write-Host "  [CLEARED] Cleared local override for $([System.IO.Path]::GetFileName($ro.Path))" -ForegroundColor Green
+                }
+                Write-Host ""
+            } else {
+                Write-Host "  [SKIPPED] Local overrides preserved. Note: these repos will not use the folder binding until local configs are cleared." -ForegroundColor Gray
+                Write-Host ""
+            }
+        }
+    }
 }
 
 function Unbind-Folder([string]$folderPath) {
@@ -765,7 +852,9 @@ function Unbind-Folder([string]$folderPath) {
     $keys = git config --global --name-only --get-regexp '^includeif\.gitdir' 2>$null
     $found = $false
     foreach ($k in $keys) {
-        if ($k -like "*$gitdirPattern*") {
+        $kClean = $k -replace '^includeif\.gitdir(/i)?:', '' -replace '\.path$', ''
+        $kNorm = $kClean.TrimEnd('/') + '/'
+        if ($kNorm.ToLower() -eq $gitdirPattern.ToLower() -or $k -like "*$gitdirPattern*") {
             git config --global --unset $k
             $found = $true
         }
@@ -791,18 +880,366 @@ function Show-FolderBindings {
         Write-Host "  No folder bindings configured." -ForegroundColor Gray
         Write-Host "  Use 'gswitch bind <folder> <account>' to bind a folder to an account." -ForegroundColor DarkCyan
     } else {
+        $accounts = Get-Accounts
         foreach ($l in $lines) {
             if ($l -match 'includeif\.gitdir(?:/i)?:(.*)\.path=(.*)') {
                 $dir = $matches[1]
                 $cfg = $matches[2]
-                Write-Host "  Folder : " -NoNewline; Write-Host "$dir" -ForegroundColor Green
-                Write-Host "  Config : " -NoNewline; Write-Host "$cfg" -ForegroundColor DarkCyan
+                $accLabel = ""
+                if ($cfg -match '\.gitconfig-(.+)$') {
+                    $accKey = $matches[1]
+                    $matchedAcc = $accounts | Where-Object { $_.Key.ToLower() -eq $accKey.ToLower() }
+                    if ($matchedAcc) {
+                        $accLabel = "$($matchedAcc.Label) ($($matchedAcc.Username))"
+                    } else {
+                        $accLabel = $accKey
+                    }
+                }
+                Write-Host "  Folder  : " -NoNewline; Write-Host "$dir" -ForegroundColor Green
+                if ($accLabel) {
+                    Write-Host "  Account : " -NoNewline; Write-Host "$accLabel" -ForegroundColor Yellow
+                }
+                Write-Host "  Config  : " -NoNewline; Write-Host "$cfg" -ForegroundColor DarkCyan
                 Write-Host ""
             }
         }
     }
     Write-Host "================================================================================" -ForegroundColor DarkGray
     Write-Host ""
+}
+
+function Update-Gswitch {
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host " Updating git-account-switcher (gswitch)" -ForegroundColor Cyan
+    Write-Host " Current Version: v$SCRIPT_VERSION" -ForegroundColor DarkCyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    $binDir = "$HOME\.local\bin"
+    if (-not (Test-Path $binDir)) {
+        New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+    }
+
+    # Detect if running from local git repo or installed script
+    $isLocalRepo = $false
+    $repoRoot = $null
+    if ($PSScriptRoot) {
+        $parentDir = Split-Path $PSScriptRoot -Parent
+        if ((Test-Path (Join-Path $PSScriptRoot "..\bin")) -and (Test-Path (Join-Path $parentDir ".git"))) {
+            $isLocalRepo = $true
+            $repoRoot = $parentDir
+        } elseif ((Test-Path (Join-Path $PSScriptRoot "git-account-switcher.ps1")) -and (Test-Path (Join-Path $PSScriptRoot "..\.git"))) {
+            $isLocalRepo = $true
+            $repoRoot = Split-Path $PSScriptRoot -Parent
+        }
+    }
+
+    $filesToUpdate = @(
+        "git-account-switcher.ps1", "git-account-switcher.cmd", "git-account-switcher",
+        "gswitch.cmd", "gswitch",
+        "switch-git.ps1", "switch-git.cmd", "switch-git"
+    )
+
+    if ($isLocalRepo -and $repoRoot) {
+        Write-Host "Detected local development repository at: $repoRoot" -ForegroundColor Yellow
+        Write-Host "Updating binaries in $binDir from local bin/..." -ForegroundColor Cyan
+        $localBin = Join-Path $repoRoot "bin"
+        foreach ($file in $filesToUpdate) {
+            $src = Join-Path $localBin $file
+            if (Test-Path $src) {
+                Copy-Item -Path $src -Destination $binDir -Force
+                Write-Host "  [OK] Updated $file" -ForegroundColor Green
+            }
+        }
+    } else {
+        Write-Host "Fetching latest release from GitHub (master branch)..." -ForegroundColor Yellow
+        foreach ($file in $filesToUpdate) {
+            $fileUrl = "$RAW_REPO_BASE/bin/$file"
+            $destFile = Join-Path $binDir $file
+            try {
+                Invoke-RestMethod -Uri $fileUrl -OutFile $destFile
+                Write-Host "  [OK] Downloaded & updated $file" -ForegroundColor Green
+            } catch {
+                Write-Host "  [WARN] Could not update $file : $_" -ForegroundColor Yellow
+            }
+        }
+    }
+
+    # Ensure aliases
+    git config --global alias.who "!git-account-switcher status"
+    git config --global alias.switch-acc "!git-account-switcher"
+
+    Write-Host ""
+    Write-Host "[OK] git-account-switcher updated successfully! (v$SCRIPT_VERSION)" -ForegroundColor Green
+    Write-Host "     All profiles and folder bindings preserved." -ForegroundColor DarkCyan
+    Write-Host ""
+}
+
+function Get-PowerShellCompletionScript {
+    return @'
+Register-ArgumentCompleter -Native -CommandName @('gswitch', 'git-account-switcher', 'switch-git') -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+
+    $subcommands = @(
+        'status', 'who', 'list', 'ls', 'doctor', 'check',
+        'bind', 'unbind', 'bindings', 'sync', 'setup',
+        'add', 'remove', 'rm', 'alias', 'unalias',
+        'edit', 'config', 'update', 'upgrade', 'version',
+        'completion', 'help', '-l', '--local', '-g', '--global', '-f', '--force', '-v', '-h'
+    )
+
+    $elements = $commandAst.Elements
+    $count = $elements.Count
+
+    $accKeys = @()
+    $cfg = if ($env:GIT_ACCOUNT_SWITCHER_CONFIG) { $env:GIT_ACCOUNT_SWITCHER_CONFIG } else { "$HOME\.config\git-account-switcher\accounts.json" }
+    if (Test-Path $cfg) {
+        try {
+            $raw = Get-Content -Path $cfg -Raw -Encoding UTF8
+            $json = $raw | ConvertFrom-Json
+            foreach ($item in $json) {
+                if ($item.key) { $accKeys += [string]$item.key }
+                if ($item.username -and $item.username -ne $item.key) { $accKeys += [string]$item.username }
+                if ($item.aliases) {
+                    foreach ($al in $item.aliases) {
+                        $alStr = [string]$al
+                        if ($alStr -notmatch '^\d+$' -and $accKeys -notcontains $alStr) { $accKeys += $alStr }
+                    }
+                }
+            }
+        } catch {}
+    }
+
+    if ($count -le 2) {
+        $candidates = $subcommands + $accKeys
+        $candidates | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        }
+        return
+    }
+
+    $firstArg = $elements[1].Value.ToLower()
+
+    if ($firstArg -in @('-l', '--local', 'remove', 'rm', 'delete', 'alias', 'unalias')) {
+        $accKeys | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        }
+        return
+    }
+
+    if ($firstArg -in @('bind')) {
+        if ($count -ge 4) {
+            $accKeys | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+            }
+        }
+        return
+    }
+
+    if ($firstArg -eq 'completion') {
+        @('powershell', 'bash', 'zsh', 'install') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        }
+        return
+    }
+}
+'@
+}
+
+function Get-BashCompletionScript {
+    return @'
+_gswitch_completions() {
+    local cur prev words cword
+    if declare -F _init_completion >/dev/null 2>&1; then
+        _init_completion || return
+    else
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+    fi
+
+    local subcommands="status who list ls doctor check bind unbind bindings sync setup add remove rm alias unalias edit config update upgrade version completion help -l --local -g --global -f --force -v -h"
+    local cfg="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
+    local acc_keys=""
+
+    if [[ -f "$cfg" ]] && command -v python3 >/dev/null 2>&1; then
+        acc_keys=$(python3 -c "
+import json
+try:
+    with open('$cfg') as f:
+        data = json.load(f)
+    keys = []
+    for a in data:
+        if a.get('key'): keys.append(a['key'])
+        if a.get('username') and a['username'] not in keys: keys.append(a['username'])
+        for al in a.get('aliases', []):
+            if not str(al).isdigit() and al not in keys: keys.append(str(al))
+    print(' '.join(keys))
+except:
+    pass
+" 2>/dev/null || true)
+    fi
+
+    if [[ "$COMP_CWORD" -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$subcommands $acc_keys" -- "$cur") )
+        return 0
+    fi
+
+    case "$prev" in
+        -l|--local|remove|rm|delete|alias|unalias)
+            COMPREPLY=( $(compgen -W "$acc_keys" -- "$cur") )
+            return 0
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh powershell install" -- "$cur") )
+            return 0
+            ;;
+        bind)
+            compopt -o filenames 2>/dev/null || true
+            COMPREPLY=( $(compgen -d -- "$cur") )
+            return 0
+            ;;
+        *)
+            if [[ "${COMP_WORDS[1]}" == "bind" && "$COMP_CWORD" -eq 3 ]]; then
+                COMPREPLY=( $(compgen -W "$acc_keys" -- "$cur") )
+                return 0
+            fi
+            ;;
+    esac
+}
+complete -F _gswitch_completions gswitch git-account-switcher switch-git
+'@
+}
+
+function Get-ZshCompletionScript {
+    return @'
+#compdef gswitch git-account-switcher switch-git
+autoload -U +X bashcompinit && bashcompinit
+_gswitch_completions() {
+    local cur prev words cword
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    local subcommands="status who list ls doctor check bind unbind bindings sync setup add remove rm alias unalias edit config update upgrade version completion help -l --local -g --global -f --force -v -h"
+    local cfg="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
+    local acc_keys=""
+
+    if [[ -f "$cfg" ]] && command -v python3 >/dev/null 2>&1; then
+        acc_keys=$(python3 -c "
+import json
+try:
+    with open('$cfg') as f:
+        data = json.load(f)
+    keys = []
+    for a in data:
+        if a.get('key'): keys.append(a['key'])
+        if a.get('username') and a['username'] not in keys: keys.append(a['username'])
+        for al in a.get('aliases', []):
+            if not str(al).isdigit() and al not in keys: keys.append(str(al))
+    print(' '.join(keys))
+except:
+    pass
+" 2>/dev/null || true)
+    fi
+
+    if [[ "$COMP_CWORD" -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$subcommands $acc_keys" -- "$cur") )
+        return 0
+    fi
+
+    case "$prev" in
+        -l|--local|remove|rm|delete|alias|unalias)
+            COMPREPLY=( $(compgen -W "$acc_keys" -- "$cur") )
+            return 0
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh powershell install" -- "$cur") )
+            return 0
+            ;;
+        bind)
+            COMPREPLY=( $(compgen -d -- "$cur") )
+            return 0
+            ;;
+        *)
+            if [[ "${COMP_WORDS[1]}" == "bind" && "$COMP_CWORD" -eq 3 ]]; then
+                COMPREPLY=( $(compgen -W "$acc_keys" -- "$cur") )
+                return 0
+            fi
+            ;;
+    esac
+}
+complete -F _gswitch_completions gswitch git-account-switcher switch-git
+'@
+}
+
+function Handle-Completion($subArg) {
+    if ($subArg -eq "bash") {
+        Write-Output (Get-BashCompletionScript)
+        return
+    }
+    if ($subArg -eq "zsh") {
+        Write-Output (Get-ZshCompletionScript)
+        return
+    }
+    if ($subArg -eq "powershell" -or -not $subArg) {
+        Write-Output (Get-PowerShellCompletionScript)
+        return
+    }
+    if ($subArg -eq "install") {
+        Write-Host ""
+        Write-Host "Installing shell auto-completion for git-account-switcher..." -ForegroundColor Cyan
+
+        if (-not (Test-Path $ConfigDir)) {
+            New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+        }
+
+        # 1. PowerShell Profile
+        $psCompFile = Join-Path $ConfigDir "completion.ps1"
+        [System.IO.File]::WriteAllText($psCompFile, (Get-PowerShellCompletionScript), [System.Text.Encoding]::UTF8)
+        Write-Host "  [OK] Generated PowerShell completion script -> $psCompFile" -ForegroundColor Green
+
+        $profPath = $PROFILE
+        $profDir = Split-Path $profPath -Parent
+        if (-not (Test-Path $profDir)) {
+            New-Item -ItemType Directory -Path $profDir -Force | Out-Null
+        }
+        if (-not (Test-Path $profPath)) {
+            New-Item -ItemType File -Path $profPath -Force | Out-Null
+        }
+
+        $profContent = Get-Content -Path $profPath -Raw -ErrorAction SilentlyContinue
+        $includeLine = "`nif (Test-Path `"$psCompFile`") { . `"$psCompFile`" }`n"
+        if ($profContent -notlike "*$psCompFile*") {
+            Add-Content -Path $profPath -Value $includeLine -Encoding UTF8
+            Write-Host "  [OK] Added completion loader to PowerShell `$PROFILE ($profPath)" -ForegroundColor Green
+        } else {
+            Write-Host "  [OK] PowerShell `$PROFILE already configured." -ForegroundColor Green
+        }
+
+        # 2. Bash / Git Bash Profile
+        $bashCompFile = Join-Path $ConfigDir "completion.bash"
+        [System.IO.File]::WriteAllText($bashCompFile, (Get-BashCompletionScript), [System.Text.Encoding]::UTF8)
+        Write-Host "  [OK] Generated Bash completion script -> $bashCompFile" -ForegroundColor Green
+
+        $bashRc = Join-Path $HOME ".bashrc"
+        $bashUnixPath = $bashCompFile.Replace('\', '/')
+        $bashInclude = "`n[[ -f `"$bashUnixPath`" ]] && source `"$bashUnixPath`"`n"
+        if (Test-Path $bashRc) {
+            $bashContent = Get-Content -Path $bashRc -Raw -ErrorAction SilentlyContinue
+            if ($bashContent -notlike "*$bashUnixPath*") {
+                Add-Content -Path $bashRc -Value $bashInclude -Encoding UTF8
+                Write-Host "  [OK] Added completion loader to ~/.bashrc" -ForegroundColor Green
+            }
+        }
+
+        Write-Host ""
+        Write-Host "[OK] Shell auto-completion successfully installed!" -ForegroundColor Green
+        Write-Host "     Type 'gswitch <Tab>' in a new terminal session to auto-complete accounts and commands." -ForegroundColor Cyan
+        Write-Host ""
+        return
+    }
+
+    Write-Host "[ERROR] Unknown completion target: '$subArg'. Supported: powershell, bash, zsh, install" -ForegroundColor Red
 }
 
 function Setup-Wizard {
@@ -1049,7 +1486,24 @@ function Invoke-Doctor {
         $locName = git config --local user.name 2>$null
         $locEmail = git config --local user.email 2>$null
         if ($locName -or $locEmail) {
-            Write-Host "  [INFO] Local repository override active ($locName <$locEmail>)" -ForegroundColor Cyan
+            $currP = ((Get-Location).Path.Replace('\', '/').TrimEnd('/') + '/').ToLower()
+            $shadowed = $false
+            foreach ($bl in $bindingLines) {
+                if ($bl -match 'includeif\.gitdir(?:/i)?:([^.]*?)\.path=(.*)') {
+                    $bClean = ($matches[1].TrimEnd('/') + '/').ToLower()
+                    if ($currP.StartsWith($bClean)) {
+                        $shadowed = $true
+                        Write-Host "  [WARN] Local repository override active ($locName <$locEmail>) in a bound directory!" -ForegroundColor Yellow
+                        Write-Host "         This repo will NOT inherit folder binding '$($matches[1])' until cleared." -ForegroundColor DarkYellow
+                        Write-Host "         To inherit folder account: git config --local --unset-all user.name; git config --local --unset-all user.email" -ForegroundColor DarkYellow
+                        $warnCount++
+                        break
+                    }
+                }
+            }
+            if (-not $shadowed) {
+                Write-Host "  [INFO] Local repository override active ($locName <$locEmail>)" -ForegroundColor Cyan
+            }
         }
     } else {
         Write-Host "  [INFO] Current directory is not a Git repository." -ForegroundColor Gray
@@ -1082,6 +1536,8 @@ function Show-HelpMessage {
     Write-Host "  gswitch status | who                View active GitHub token & Git identities" -ForegroundColor White
     Write-Host "  gswitch list | ls                   List all configured account profiles with aliases" -ForegroundColor White
     Write-Host "  gswitch doctor | check              Run system & repository diagnostic health checks" -ForegroundColor White
+    Write-Host "  gswitch update | upgrade            Update git-account-switcher to latest version" -ForegroundColor White
+    Write-Host "  gswitch version | -v                Display installed version" -ForegroundColor White
     Write-Host "  gswitch alias [acc] [shortcut]      Add or view shortcut aliases for quick switching" -ForegroundColor White
     Write-Host "  gswitch unalias [acc] [alias]       Remove a shortcut alias from an account profile" -ForegroundColor White
     Write-Host "  gswitch bind [dir] [account]        Permanently bind an entire folder to an account" -ForegroundColor White
@@ -1108,6 +1564,9 @@ function Show-HelpMessage {
     Write-Host "  setup    Launch the first-time guided setup wizard" -ForegroundColor White
     Write-Host "  status   Display active GitHub CLI user and global/local Git user.name & email" -ForegroundColor White
     Write-Host "  list     Display formatted table of all configured profiles with * ACTIVE badge" -ForegroundColor White
+    Write-Host "  update   Download and install latest release of git-account-switcher" -ForegroundColor White
+    Write-Host "  version  Display installed version: gswitch version / gswitch -v" -ForegroundColor White
+    Write-Host "  completion Install or output tab auto-completion: gswitch completion [install|powershell|bash|zsh]" -ForegroundColor White
     Write-Host ""
     Write-Host "FLAGS:" -ForegroundColor Yellow
     Write-Host "  -l, --local                         Scope changes to current repository only (.git/config)" -ForegroundColor White
@@ -1131,6 +1590,9 @@ function Show-HelpMessage {
     Write-Host "  gswitch add octocat work            # Add 'octocat' with key 'work' non-interactively" -ForegroundColor Gray
     Write-Host "  gswitch remove work                 # Remove the 'work' account profile" -ForegroundColor Gray
     Write-Host "  gswitch remove 2 -f                 # Force remove account #2 without confirmation" -ForegroundColor Gray
+    Write-Host "  gswitch update                      # Update gswitch to latest version" -ForegroundColor Gray
+    Write-Host "  gswitch version                     # Show installed version (e.g. v$SCRIPT_VERSION)" -ForegroundColor Gray
+    Write-Host "  gswitch completion install          # Install shell tab auto-completion to profile" -ForegroundColor Gray
     Write-Host "  git who                             # Fast alias to inspect current identity" -ForegroundColor Gray
     Write-Host ""
     Write-Host "CONFIG PATH:" -ForegroundColor Yellow
@@ -1171,6 +1633,21 @@ if ($Command -eq "cred") {
 
 if ($Help -or $Command -in @("help", "-h", "--help", "-?", "/?")) {
     Show-HelpMessage
+    exit 0
+}
+
+if ($Version -or $Command -in @("version", "-v", "--version", "-V")) {
+    Write-Host "git-account-switcher (gswitch) v$SCRIPT_VERSION" -ForegroundColor Cyan
+    exit 0
+}
+
+if ($Command -in @("update", "upgrade")) {
+    Update-Gswitch
+    exit 0
+}
+
+if ($Command -in @("completion", "completions", "autocomplete")) {
+    Handle-Completion $Argument
     exit 0
 }
 

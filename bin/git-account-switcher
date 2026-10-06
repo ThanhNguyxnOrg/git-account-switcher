@@ -4,12 +4,6 @@
 # Native POSIX Bash for macOS, Linux, and Windows (Git Bash/WSL)
 # ==============================================================================
 
-# If running in Windows Git Bash and powershell.exe is available, delegate to powershell
-if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && command -v powershell.exe >/dev/null 2>&1; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    exec powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
-fi
-
 if [[ "$1" == "cred" ]]; then
     target_user="$2"
     action="$3"
@@ -33,6 +27,14 @@ if [[ "$1" == "cred" ]]; then
     exit 0
 fi
 
+# If running in Windows Git Bash and powershell.exe is available, delegate to powershell
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && command -v powershell.exe >/dev/null 2>&1; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && (pwd -W 2>/dev/null || pwd))"
+    exec powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
+fi
+
+SCRIPT_VERSION="1.2.0"
+RAW_BASE="https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master"
 CONFIG_FILE="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 
@@ -79,11 +81,51 @@ show_status() {
         echo -e " Git Signing Key   : \033[0;32m$eff_sign\033[0m"
     fi
 
+    # Check if current directory matches any configured folder binding
+    local curr_path matched_dir matched_cfg
+    if command -v cygpath >/dev/null 2>&1; then
+        curr_path=$(cygpath -m "$(pwd)")
+    elif (pwd -W) >/dev/null 2>&1; then
+        curr_path=$(pwd -W)
+    else
+        curr_path=$(pwd)
+    fi
+    curr_path="${curr_path%/}/"
+
+    while IFS= read -r line; do
+        if [[ $line =~ includeif\.gitdir(/i)?:(.*)\.path=(.*) ]]; then
+            local b_dir="${BASH_REMATCH[2]}"
+            local b_cfg="${BASH_REMATCH[3]}"
+            local clean_b="${b_dir%/}/"
+            if [[ "${curr_path,,}" == "${clean_b,,}"* ]]; then
+                matched_dir="$b_dir"
+                matched_cfg="$b_cfg"
+                break
+            fi
+        fi
+    done < <(git config --global --list --show-origin 2>/dev/null | grep -E 'includeif\.gitdir' || true)
+
     if [[ "$is_repo" == "true" && (-n "$local_name" || -n "$local_email") ]]; then
         echo " ------------------------------------------------------------"
         echo -e " \033[1;33m[Repo Local Override detected in current directory]\033[0m"
         echo -e " Git Local Name    : \033[1;33m$local_name\033[0m"
         echo -e " Git Local Email   : \033[1;33m$local_email\033[0m"
+        if [[ -n "$matched_dir" ]]; then
+            echo -e " \033[1;31m[WARNING] Folder Binding active ($matched_dir) is SHADOWED by this local override!\033[0m"
+            echo -e "           \033[0;33mTo inherit folder account, run: git config --local --unset-all user.name && git config --local --unset-all user.email\033[0m"
+        fi
+    elif [[ -n "$matched_dir" ]]; then
+        echo " ------------------------------------------------------------"
+        echo -e " \033[1;33m[Folder includeIf Binding Active in this directory]\033[0m"
+        echo -e " Bound Folder      : \033[0;36m$matched_dir\033[0m"
+        echo -e " Git Effective Name : \033[0;32m$eff_name\033[0m"
+        echo -e " Git Effective Email: \033[0;32m$eff_email\033[0m"
+        local b_user
+        b_user=$(git config -f "$matched_cfg" credential.https://github.com.username 2>/dev/null || true)
+        if [[ -n "$b_user" && "$active_gh" != "(none / not logged in)" && "${active_gh,,}" != "${b_user,,}" ]]; then
+            echo -e " \033[1;33m[INFO] GitHub CLI is active as '$active_gh', while this folder commits/pushes as '$b_user'.\033[0m"
+            echo -e "        \033[0;90mTo switch GitHub CLI commands (gh pr, gh issue) to '$b_user', run: gswitch $b_user\033[0m"
+        fi
     elif [[ -n "$eff_email" && ("$eff_email" != "$global_email" || "$eff_name" != "$global_name") ]]; then
         echo " ------------------------------------------------------------"
         echo -e " \033[1;33m[Folder includeIf Binding Active in this directory]\033[0m"
@@ -556,7 +598,13 @@ bind_folder() {
     fi
 
     local resolved
-    resolved=$(cd "$folder" 2>/dev/null && pwd || echo "$folder")
+    if command -v cygpath >/dev/null 2>&1; then
+        resolved=$(cd "$folder" 2>/dev/null && cygpath -m "$(pwd)" || cygpath -m "$folder")
+    elif (cd "$folder" 2>/dev/null && pwd -W) >/dev/null 2>&1; then
+        resolved=$(cd "$folder" 2>/dev/null && pwd -W || echo "$folder")
+    else
+        resolved=$(cd "$folder" 2>/dev/null && pwd || echo "$folder")
+    fi
     local pattern="${resolved%/}/"
 
     if [[ -z "$target" ]]; then
@@ -625,6 +673,47 @@ print(f\"     Name    : {match['name']}\")
 print(f\"     Email   : {match['email']}\")
 print(f\"     Username: {u} (auto-authenticated via gh token)\n\")
 " "$target" "$pattern" "$resolved"
+
+    # Scan for existing repos with local overrides
+    if [[ -d "$resolved" ]]; then
+        local found_overrides=()
+        if [[ -d "$resolved/.git" ]]; then
+            local ln le
+            ln=$(git -C "$resolved" config --local user.name 2>/dev/null || true)
+            le=$(git -C "$resolved" config --local user.email 2>/dev/null || true)
+            if [[ -n "$ln" || -n "$le" ]]; then
+                found_overrides+=("$resolved|$ln|$le")
+            fi
+        else
+            for sub in "$resolved"/*; do
+                if [[ -d "$sub/.git" ]]; then
+                    local sln sle
+                    sln=$(git -C "$sub" config --local user.name 2>/dev/null || true)
+                    sle=$(git -C "$sub" config --local user.email 2>/dev/null || true)
+                    if [[ -n "$sln" || -n "$sle" ]]; then
+                        found_overrides+=("$sub|$sln|$sle")
+                    fi
+                fi
+            done
+        fi
+        if [[ ${#found_overrides[@]} -gt 0 ]]; then
+            echo -e "\033[1;33m[NOTICE] Found ${#found_overrides[@]} repository(ies) with local (.git/config) overrides:\033[0m"
+            for item in "${found_overrides[@]}"; do
+                IFS='|' read -r rpath rname remail <<< "$item"
+                echo -e "  - \033[0;33m$(basename "$rpath")\033[0m: user.name='$rname', user.email='$remail'"
+            done
+            echo -e "  \033[0;33mLocal overrides take precedence over folder bindings in Git.\033[0m"
+            read -r -p "Would you like to clear local overrides in these repositories? [Y/n] " clean_choice
+            if [[ -z "$clean_choice" || "$clean_choice" =~ ^[yY]$ ]]; then
+                for item in "${found_overrides[@]}"; do
+                    IFS='|' read -r rpath rname remail <<< "$item"
+                    git -C "$rpath" config --local --unset-all user.name 2>/dev/null || true
+                    git -C "$rpath" config --local --unset-all user.email 2>/dev/null || true
+                    echo -e "  \033[0;32m[CLEARED] Cleared local override for $(basename "$rpath")\033[0m"
+                done
+            fi
+        fi
+    fi
 }
 
 unbind_folder() {
@@ -639,12 +728,21 @@ unbind_folder() {
     fi
 
     local resolved
-    resolved=$(cd "$folder" 2>/dev/null && pwd || echo "$folder")
+    if command -v cygpath >/dev/null 2>&1; then
+        resolved=$(cd "$folder" 2>/dev/null && cygpath -m "$(pwd)" || cygpath -m "$folder")
+    elif (cd "$folder" 2>/dev/null && pwd -W) >/dev/null 2>&1; then
+        resolved=$(cd "$folder" 2>/dev/null && pwd -W || echo "$folder")
+    else
+        resolved=$(cd "$folder" 2>/dev/null && pwd || echo "$folder")
+    fi
     local pattern="${resolved%/}/"
 
     local found="false"
     while IFS= read -r k; do
-        if [[ "$k" == *"$pattern"* ]]; then
+        local k_clean
+        k_clean=$(echo "$k" | sed -E 's/^includeif\.gitdir(\/i)?://; s/\.path$//')
+        local k_norm="${k_clean%/}/"
+        if [[ "${k_norm,,}" == "${pattern,,}" || "${k,,}" == *"${pattern,,}"* ]]; then
             git config --global --unset "$k" || true
             found="true"
         fi
@@ -663,13 +761,22 @@ show_bindings() {
     echo "================================================================================"
     local found="false"
     while IFS= read -r line; do
-        if [[ $line =~ includeif\.gitdir(?:/i)?:(.*)\.path=(.*) ]]; then
-            echo -e "  Folder : \033[0;32m${BASH_REMATCH[1]}\033[0m"
-            echo -e "  Config : \033[0;36m${BASH_REMATCH[2]}\033[0m"
+        if [[ $line =~ includeif\.gitdir(/i)?:(.*)\.path=(.*) ]]; then
+            local b_dir="${BASH_REMATCH[2]}"
+            local b_cfg="${BASH_REMATCH[3]}"
+            local b_acc=""
+            if [[ "$b_cfg" =~ \.gitconfig-(.+) ]]; then
+                b_acc="${BASH_REMATCH[1]}"
+            fi
+            echo -e "  Folder  : \033[0;32m$b_dir\033[0m"
+            if [[ -n "$b_acc" ]]; then
+                echo -e "  Account : \033[0;33m$b_acc\033[0m"
+            fi
+            echo -e "  Config  : \033[0;36m$b_cfg\033[0m"
             echo ""
             found="true"
         fi
-    done < <(git config --global --list --show-origin 2>/dev/null | grep 'includeif\.gitdir' || true)
+    done < <(git config --global --list --show-origin 2>/dev/null | grep -E 'includeif\.gitdir' || true)
 
     if [[ "$found" == "false" ]]; then
         echo "  No folder bindings configured."
@@ -823,6 +930,37 @@ except Exception as e:
                     ;;
             esac
         fi
+
+        local loc_name loc_email
+        loc_name=$(git config --local user.name 2>/dev/null || true)
+        loc_email=$(git config --local user.email 2>/dev/null || true)
+        if [[ -n "$loc_name" || -n "$loc_email" ]]; then
+            local curr_p shadowed="false"
+            if command -v cygpath >/dev/null 2>&1; then
+                curr_p=$(cygpath -m "$(pwd)")
+            elif (pwd -W) >/dev/null 2>&1; then
+                curr_p=$(pwd -W)
+            else
+                curr_p=$(pwd)
+            fi
+            curr_p="${curr_p%/}/"
+            while IFS= read -r bline; do
+                if [[ $bline =~ includeif\.gitdir(/i)?:(.*)\.path=(.*) ]]; then
+                    local cb="${BASH_REMATCH[2]%/}/"
+                    if [[ "${curr_p,,}" == "${cb,,}"* ]]; then
+                        shadowed="true"
+                        echo -e "  \033[1;33m[WARN] Local repository override active ($loc_name <$loc_email>) in a bound directory!\033[0m"
+                        echo -e "         This repo will NOT inherit folder binding '${BASH_REMATCH[2]}' until cleared."
+                        echo -e "         To inherit folder account: git config --local --unset-all user.name && git config --local --unset-all user.email"
+                        ((warn_count++)) || true
+                        break
+                    fi
+                fi
+            done <<< "$binding_lines"
+            if [[ "$shadowed" == "false" ]]; then
+                echo -e "  [INFO] Local repository override active ($loc_name <$loc_email>)"
+            fi
+        fi
     else
         echo -e "  [INFO] Current directory is not a Git repository."
     fi
@@ -840,6 +978,226 @@ except Exception as e:
     echo ""
 }
 
+update_gswitch() {
+    echo ""
+    echo "============================================================"
+    echo -e " \033[0;36mUpdating git-account-switcher (gswitch)\033[0m"
+    echo -e " \033[0;34mCurrent Version: v$SCRIPT_VERSION\033[0m"
+    echo "============================================================"
+    echo ""
+
+    local bin_dir="$HOME/.local/bin"
+    mkdir -p "$bin_dir"
+
+    local is_local=false
+    local script_dir=""
+    if [[ -n "${BASH_SOURCE[0]}" && -f "$(dirname "${BASH_SOURCE[0]}")/git-account-switcher" ]]; then
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -f "$script_dir/../install.sh" ]]; then
+            is_local=true
+        fi
+    fi
+
+    echo "Fetching and updating binary files..."
+    local files=("git-account-switcher" "gswitch" "switch-git")
+    for f in "${files[@]}"; do
+        local dest="$bin_dir/$f"
+        if [[ "$is_local" == "true" && -f "$script_dir/$f" ]]; then
+            cp "$script_dir/$f" "$dest"
+            chmod +x "$dest"
+            echo -e "  \033[0;32m[OK] Updated $f (local source)\033[0m"
+        else
+            if curl -fsSL "$RAW_BASE/bin/$f" -o "$dest" 2>/dev/null; then
+                chmod +x "$dest"
+                echo -e "  \033[0;32m[OK] Updated $f (remote source)\033[0m"
+            else
+                echo -e "  \033[1;33m[WARN] Failed to update $f from remote\033[0m"
+            fi
+        fi
+    done
+
+    # Ensure Git aliases
+    git config --global alias.who "!git-account-switcher status" 2>/dev/null || true
+    git config --global alias.switch-acc "!git-account-switcher" 2>/dev/null || true
+
+    echo ""
+    echo -e "\033[0;32m[OK] git-account-switcher updated successfully! (v$SCRIPT_VERSION)\033[0m"
+    echo -e "\033[0;36m     Your configuration ($CONFIG_FILE) and folder bindings remain safe and intact.\033[0m"
+    echo ""
+}
+
+get_bash_completion_script() {
+    cat << 'EOF'
+_gswitch_completions() {
+    local cur prev words cword
+    if declare -F _init_completion >/dev/null 2>&1; then
+        _init_completion || return
+    else
+        cur="${COMP_WORDS[COMP_CWORD]}"
+        prev="${COMP_WORDS[COMP_CWORD-1]}"
+    fi
+
+    local subcommands="status who list ls doctor check bind unbind bindings sync setup add remove rm alias unalias edit config update upgrade version completion help -l --local -g --global -f --force -v -h"
+    local cfg="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
+    local acc_keys=""
+
+    if [[ -f "$cfg" ]] && command -v python3 >/dev/null 2>&1; then
+        acc_keys=$(python3 -c "
+import json
+try:
+    with open('$cfg') as f:
+        data = json.load(f)
+    keys = []
+    for a in data:
+        if a.get('key'): keys.append(a['key'])
+        if a.get('username') and a['username'] not in keys: keys.append(a['username'])
+        for al in a.get('aliases', []):
+            if not str(al).isdigit() and al not in keys: keys.append(str(al))
+    print(' '.join(keys))
+except:
+    pass
+" 2>/dev/null || true)
+    fi
+
+    if [[ "$COMP_CWORD" -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$subcommands $acc_keys" -- "$cur") )
+        return 0
+    fi
+
+    case "$prev" in
+        -l|--local|remove|rm|delete|alias|unalias)
+            COMPREPLY=( $(compgen -W "$acc_keys" -- "$cur") )
+            return 0
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh powershell install" -- "$cur") )
+            return 0
+            ;;
+        bind)
+            compopt -o filenames 2>/dev/null || true
+            COMPREPLY=( $(compgen -d -- "$cur") )
+            return 0
+            ;;
+        *)
+            if [[ "${COMP_WORDS[1]}" == "bind" && "$COMP_CWORD" -eq 3 ]]; then
+                COMPREPLY=( $(compgen -W "$acc_keys" -- "$cur") )
+                return 0
+            fi
+            ;;
+    esac
+}
+complete -F _gswitch_completions gswitch git-account-switcher switch-git
+EOF
+}
+
+get_zsh_completion_script() {
+    cat << 'EOF'
+#compdef gswitch git-account-switcher switch-git
+autoload -U +X bashcompinit && bashcompinit
+_gswitch_completions() {
+    local cur prev words cword
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    local subcommands="status who list ls doctor check bind unbind bindings sync setup add remove rm alias unalias edit config update upgrade version completion help -l --local -g --global -f --force -v -h"
+    local cfg="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
+    local acc_keys=""
+
+    if [[ -f "$cfg" ]] && command -v python3 >/dev/null 2>&1; then
+        acc_keys=$(python3 -c "
+import json
+try:
+    with open('$cfg') as f:
+        data = json.load(f)
+    keys = []
+    for a in data:
+        if a.get('key'): keys.append(a['key'])
+        if a.get('username') and a['username'] not in keys: keys.append(a['username'])
+        for al in a.get('aliases', []):
+            if not str(al).isdigit() and al not in keys: keys.append(str(al))
+    print(' '.join(keys))
+except:
+    pass
+" 2>/dev/null || true)
+    fi
+
+    if [[ "$COMP_CWORD" -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "$subcommands $acc_keys" -- "$cur") )
+        return 0
+    fi
+
+    case "$prev" in
+        -l|--local|remove|rm|delete|alias|unalias)
+            COMPREPLY=( $(compgen -W "$acc_keys" -- "$cur") )
+            return 0
+            ;;
+        completion)
+            COMPREPLY=( $(compgen -W "bash zsh powershell install" -- "$cur") )
+            return 0
+            ;;
+        bind)
+            COMPREPLY=( $(compgen -d -- "$cur") )
+            return 0
+            ;;
+        *)
+            if [[ "${COMP_WORDS[1]}" == "bind" && "$COMP_CWORD" -eq 3 ]]; then
+                COMPREPLY=( $(compgen -W "$acc_keys" -- "$cur") )
+                return 0
+            fi
+            ;;
+    esac
+}
+complete -F _gswitch_completions gswitch git-account-switcher switch-git
+EOF
+}
+
+handle_completion() {
+    local target="$1"
+    if [[ "$target" == "zsh" ]]; then
+        get_zsh_completion_script
+        return
+    elif [[ "$target" == "bash" || -z "$target" ]]; then
+        get_bash_completion_script
+        return
+    elif [[ "$target" == "install" ]]; then
+        echo ""
+        echo "Installing shell auto-completion for git-account-switcher..."
+        mkdir -p "$CONFIG_DIR"
+        local comp_file="$CONFIG_DIR/completion.bash"
+        get_bash_completion_script > "$comp_file"
+        echo "  [OK] Generated completion script -> $comp_file"
+
+        local bashrc="$HOME/.bashrc"
+        local include_line="[[ -f \"$comp_file\" ]] && source \"$comp_file\""
+        if [[ -f "$bashrc" ]]; then
+            if ! grep -q "$comp_file" "$bashrc" 2>/dev/null; then
+                echo -e "\n# git-account-switcher shell completion\n$include_line" >> "$bashrc"
+                echo "  [OK] Added completion loader to ~/.bashrc"
+            else
+                echo "  [OK] ~/.bashrc is already configured."
+            fi
+        fi
+
+        local zshrc="$HOME/.zshrc"
+        if [[ -f "$zshrc" ]]; then
+            local zcomp_file="$CONFIG_DIR/completion.zsh"
+            get_zsh_completion_script > "$zcomp_file"
+            local zinclude="[[ -f \"$zcomp_file\" ]] && source \"$zcomp_file\""
+            if ! grep -q "$zcomp_file" "$zshrc" 2>/dev/null; then
+                echo -e "\n# git-account-switcher shell completion\n$zinclude" >> "$zshrc"
+                echo "  [OK] Added completion loader to ~/.zshrc"
+            fi
+        fi
+
+        echo ""
+        echo -e "\033[0;32m[OK] Shell auto-completion successfully installed!\033[0m"
+        echo -e "\033[0;36m     Restart your shell or run: source ~/.bashrc (or ~/.zshrc)\033[0m"
+        echo ""
+        return
+    fi
+    echo -e "\033[0;31m[ERROR] Unknown completion target: '$target'. Supported: bash, zsh, install\033[0m"
+}
+
 show_help() {
     echo ""
     echo "============================================================"
@@ -854,6 +1212,8 @@ show_help() {
     echo "  gswitch status | who                View active GitHub token & Git identities"
     echo "  gswitch list | ls                   List all configured account profiles with aliases"
     echo "  gswitch doctor | check              Run system & repository diagnostic health checks"
+    echo "  gswitch update | upgrade            Update git-account-switcher to latest version"
+    echo "  gswitch version | -v                Display installed version"
     echo "  gswitch alias [acc] [shortcut]      Add or view shortcut aliases for quick switching"
     echo "  gswitch unalias [acc] [alias]       Remove a shortcut alias from an account profile"
     echo "  gswitch bind [dir] [account]        Permanently bind an entire folder to an account"
@@ -880,6 +1240,9 @@ show_help() {
     echo "  setup    Launch the first-time guided setup wizard"
     echo "  status   Display active GitHub CLI user and global/local Git user.name & email"
     echo "  list     Display formatted table of all configured profiles with * ACTIVE badge"
+    echo "  update   Download and install latest release of git-account-switcher"
+    echo "  version  Display installed version: gswitch version / gswitch -v"
+    echo "  completion Install or output tab auto-completion: gswitch completion [install|bash|zsh]"
     echo ""
     echo -e "\033[1;33mFLAGS:\033[0m"
     echo "  -l, --local                         Scope changes to current repository only (.git/config)"
@@ -903,6 +1266,9 @@ show_help() {
     echo "  gswitch add octocat work            # Add 'octocat' with key 'work' non-interactively"
     echo "  gswitch remove work                 # Remove the 'work' account profile"
     echo "  gswitch remove 2 -f                 # Force remove account #2 without confirmation"
+    echo "  gswitch update                      # Update gswitch to latest version"
+    echo "  gswitch version                     # Show installed version (e.g. v$SCRIPT_VERSION)"
+    echo "  gswitch completion install          # Install shell tab auto-completion to profile"
     echo "  git who                             # Fast alias to inspect current identity"
     echo ""
     echo -e "\033[1;33mCONFIG PATH:\033[0m"
@@ -1107,6 +1473,19 @@ while [[ $# -gt 0 ]]; do
                 shift
             done
             remove_account "$TARGET" "$FORCE"
+            exit 0
+            ;;
+        version|-v|--version|-V)
+            echo -e "\033[0;36mgit-account-switcher (gswitch) v$SCRIPT_VERSION\033[0m"
+            exit 0
+            ;;
+        update|upgrade)
+            update_gswitch
+            exit 0
+            ;;
+        completion|completions|autocomplete)
+            shift
+            handle_completion "$1"
             exit 0
             ;;
         help|-h|--help)

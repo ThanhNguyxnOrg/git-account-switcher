@@ -233,8 +233,38 @@ All tests execute in an isolated sandbox temporary directory (`$sandboxConfig`) 
 
 ---
 
+## Folder Binding Doesn't Seem to Apply (`includeIf` Gotchas)
+
+### 1. Repository-Local `.git/config` Overrides
+Git evaluates configuration in the following order:
+1. Local repository config (`.git/config` or `gswitch -l`)
+2. Global configuration (`~/.gitconfig`, including `includeIf` rules)
+
+If a repository inside a bound directory previously had `user.name` or `user.email` set locally, Git will **ignore the folder binding** and use the local value.
+- **Diagnosis:** Run `gswitch status` or `gswitch doctor` inside the repository. It will report `[WARNING] Folder Binding active is SHADOWED by this local override!`.
+- **Solution:** Clear the local override so the repository inherits the folder binding:
+  ```bash
+  git config --local --unset-all user.name
+  git config --local --unset-all user.email
+  ```
+  *(Note: Running `gswitch bind` automatically detects existing repositories with local overrides and offers to clear them for you).*
+
+### 2. GitHub CLI (`gh`) Remains Global
+Git's `includeIf` operates strictly on Git commit authorship and Git HTTPS push/pull credentials. Standalone GitHub CLI commands (`gh pr create`, `gh issue list`, `gh repo view`) do not read Git configuration files.
+- If you need to run `gh` CLI commands under the folder's account, run `gswitch <account>` to switch the active GitHub CLI session.
+
+### 3. Cloning Private Repositories into a Bound Folder
+`includeIf.gitdir` requires an existing `.git` directory to match the folder pattern. When running `git clone` from inside the bound directory, Git has not yet created the `.git` directory during credential resolution, so it uses the global account token.
+- **Solution:** If cloning a private repository belonging to the bound account, either run `gswitch <account>` first, or include the username in the clone URL:
+  ```bash
+  git clone https://<username>@github.com/<org>/<repo>.git
+  ```
+
+---
+
 ## Related Documentation
 
 - 🚀 [Complete Workflow Guide](workflow.md)
 - ⚙️ [Configuration & Schema Guide](configuration.md)
 - 🤖 [Autonomous AI Agent Guide](../AGENT.md)
+

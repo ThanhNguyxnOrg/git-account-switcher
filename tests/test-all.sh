@@ -39,6 +39,25 @@ test_help() {
     [[ "$out" == *"USAGE:"* && "$out" == *"COMMANDS:"* ]]
 }
 
+test_version() {
+    local out1 out2
+    out1=$("$SWITCHER" version 2>&1)
+    out2=$("$SWITCHER" -v 2>&1)
+    [[ "$out1" == *"v1.2.0"* && "$out2" == *"v1.2.0"* ]]
+}
+
+test_update() {
+    local out
+    out=$("$SWITCHER" update 2>&1)
+    [[ "$out" == *"Updating git-account-switcher"* && "$out" == *"updated successfully"* ]]
+}
+
+test_completion() {
+    local out
+    out=$("$SWITCHER" completion bash 2>&1)
+    [[ "$out" == *"complete -F _gswitch_completions"* ]]
+}
+
 # Sandbox integration tests
 SANDBOX_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'gswitch_test')
 SANDBOX_CONFIG="$SANDBOX_DIR/accounts.json"
@@ -122,8 +141,38 @@ test_bindings() {
     [[ "$out" == *"Configured Folder Bindings"* ]]
 }
 
+test_bind_unbind() {
+    local bound_dir="$SANDBOX_DIR/test_bound"
+    local sub_repo="$bound_dir/sub"
+    mkdir -p "$sub_repo"
+    "$SWITCHER" add mockbashuser testisolatedbashkey "Bash Mock" "bash@mock.org" >/dev/null 2>&1
+    "$SWITCHER" bind "$bound_dir" testisolatedbashkey >/dev/null 2>&1
+    local blist
+    blist=$("$SWITCHER" bindings 2>&1)
+    [[ "$blist" == *"test_bound"* ]]
+    (
+        cd "$sub_repo"
+        git init -q
+        local ename eemail
+        ename=$(git config user.name)
+        eemail=$(git config user.email)
+        [[ "$ename" == "Bash Mock" && "$eemail" == "bash@mock.org" ]]
+        local st
+        st=$("$SWITCHER" status 2>&1)
+        [[ "$st" == *"Folder includeIf Binding Active"* ]]
+    )
+    "$SWITCHER" unbind "$bound_dir" >/dev/null 2>&1
+    rm -f "$HOME/.gitconfig-testisolatedbashkey"
+    local blist_after
+    blist_after=$("$SWITCHER" bindings 2>&1)
+    [[ "$blist_after" != *"test_bound"* ]]
+}
+
 assert_test "Bash Script Syntax Validation" test_syntax
 assert_test "Help flag execution ('help')" test_help
+assert_test "Version command execution ('version' & '-v')" test_version
+assert_test "Update command execution ('update')" test_update
+assert_test "Shell completion script generator ('completion bash')" test_completion
 assert_test "Empty config list handling" test_empty_list
 assert_test "Add profile non-interactively ('add octocat work')" test_add_first
 assert_test "Add second profile ('add student-mona school')" test_add_second
@@ -132,6 +181,7 @@ assert_test "Add shortcut alias ('alias work w')" test_add_alias
 assert_test "Remove shortcut alias ('unalias work w')" test_remove_alias
 assert_test "Remove profile and clean reindex ('remove school -f')" test_remove_profile
 assert_test "List folder bindings command ('bindings')" test_bindings
+assert_test "Folder bind, inherit & unbind ('bind' & 'unbind')" test_bind_unbind
 assert_test "Credential helper command ('cred <user> get')" test_cred
 assert_test "Diagnostics command ('doctor')" test_doctor
 assert_test "SSH Remote Warning in Status" test_ssh_warning

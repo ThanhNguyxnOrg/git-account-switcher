@@ -135,6 +135,12 @@ git config --global alias.switch-acc "!git-account-switcher"
 Write-Host "  [OK] Added git alias: git who" -ForegroundColor Green
 Write-Host "  [OK] Added git alias: git switch-acc" -ForegroundColor Green
 
+# 6. Configure Shell auto-completion
+try {
+    & (Join-Path $binDir "git-account-switcher.ps1") completion install | Out-Null
+    Write-Host "  [OK] Configured shell auto-completion (gswitch <Tab>)." -ForegroundColor Green
+} catch {}
+
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host " Installation Complete!" -ForegroundColor Green

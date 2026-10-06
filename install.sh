@@ -88,11 +88,15 @@ git config --global --add credential.https://gist.github.com.helper '!gh auth gi
 echo "  [OK] Git credential helper linked to GitHub CLI (gh)."
 
 # 5. Configure Git aliases
-echo "[5/5] Setting up Git aliases..."
+echo "[5/5] Setting up Git aliases & completions..."
 git config --global alias.who '!git-account-switcher status'
 git config --global alias.switch-acc '!git-account-switcher'
 echo "  [OK] Added git alias: git who"
 echo "  [OK] Added git alias: git switch-acc"
+
+# 6. Configure Shell auto-completion
+"$BIN_DIR/git-account-switcher" completion install >/dev/null 2>&1 || true
+echo "  [OK] Configured shell auto-completion (gswitch <Tab>)"
 
 echo ""
 echo "============================================================"
