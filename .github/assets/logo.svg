@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="4 36 112 52" fill="none">
+  <!-- gswitch mark: account toggle + swap -->
+  <rect x="10" y="46" width="100" height="32" rx="16" stroke="#64748B" stroke-width="5"/>
+  <circle cx="32" cy="62" r="6" fill="none" stroke="#64748B" stroke-width="4"/>
+  <circle cx="88" cy="62" r="19" fill="#8B5CF6"/>
+  <g stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M80 57 L94 57 M90 53 L94 57 L90 61"/>
+    <path d="M96 67 L82 67 M86 63 L82 67 L86 71"/>
+  </g>
+</svg>

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/assets/logo.svg" alt="git-account-switcher logo" width="160" />
+</p>
+
 # git-account-switcher ⚡
 
 > **The missing bridge between Git commit identities and GitHub CLI authentication.**  
