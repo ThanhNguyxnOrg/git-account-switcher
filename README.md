@@ -1,5 +1,5 @@
 <p align="center">
-  <img src=".github/assets/logo.svg" alt="git-account-switcher logo" width="160" />
+  <img src=".github/assets/logo.png" alt="git-account-switcher logo" width="200" />
 </p>
 
 # git-account-switcher ⚡
