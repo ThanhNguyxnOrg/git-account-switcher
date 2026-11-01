@@ -21,7 +21,7 @@ jobs:
           app-id: ${{ secrets.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
+          repositories: "git-account-switcher,homebrew-tap,scoop-bucket"
           permission-contents: write
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -107,3 +107,27 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+
+      - name: Sync package manager repositories
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          update_file() {
+            repo="$1"
+            path="$2"
+            src="$3"
+            msg="$4"
+            content="$(base64 -w0 "$src")"
+            sha="$(gh api "repos/ThanhNguyxnOrg/$repo/contents/$path" --jq .sha 2>/dev/null || true)"
+            if [[ -n "$sha" ]]; then
+              gh api --method PUT "repos/ThanhNguyxnOrg/$repo/contents/$path" \
+                -f message="$msg" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+            else
+              gh api --method PUT "repos/ThanhNguyxnOrg/$repo/contents/$path" \
+                -f message="$msg" -f content="$content" -f branch=main >/dev/null
+            fi
+          }
+          update_file homebrew-tap Formula/gswitch.rb dist/gswitch.rb "chore: gswitch v$version"
+          update_file scoop-bucket bucket/gswitch.json dist/gswitch.json "chore: gswitch v$version"

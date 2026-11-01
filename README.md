@@ -119,6 +119,23 @@ git who               # Check who is currently active
 
 ---
 
+### Install via package managers
+
+```bash
+# macOS / Linux
+brew install ThanhNguyxnOrg/tap/gswitch
+brew upgrade gswitch
+```
+
+```powershell
+# Windows (Scoop)
+scoop bucket add thanhnguyxn https://github.com/ThanhNguyxnOrg/scoop-bucket
+scoop install gswitch
+scoop update gswitch
+```
+
+If installed through a package manager, use that package manager for upgrades. `gswitch update` is for direct release installs.
+
 ## 🎮 Command Cheat Sheet
 
 | Command | Shorthand | Description |
