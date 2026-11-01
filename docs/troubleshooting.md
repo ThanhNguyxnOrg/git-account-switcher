@@ -197,8 +197,8 @@ Installers and `gswitch update` are intentionally fail-closed: they require a pu
   ```
 - Pin a known release if you do not want the latest:
   ```bash
-  GSWITCH_INSTALL_TAG=v1.0.0 ./install.sh
-  GSWITCH_UPDATE_TAG=v1.0.0 gswitch update
+  GSWITCH_INSTALL_TAG=v1.0.1 ./install.sh
+  GSWITCH_UPDATE_TAG=v1.0.1 gswitch update
   ```
 - Do not bypass verification by downloading files from `master`; that reintroduces the supply-chain risk this gate protects against.
 

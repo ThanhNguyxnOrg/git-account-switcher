@@ -4,11 +4,20 @@
 # Native POSIX Bash for macOS, Linux, and Windows (Git Bash/WSL)
 # ==============================================================================
 
+to_lower() {
+    printf '%s' "$1" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+}
+
+capitalize() {
+    printf '%s' "$1" | awk '{ print toupper(substr($0,1,1)) substr($0,2) }'
+}
+
 if [[ "$1" == "cred" ]]; then
     target_user="$2"
     action="$3"
     cred_host="$4"
-    if [[ -n "$cred_host" && "${cred_host,,}" != "github.com" && "${cred_host,,}" != "gist.github.com" ]]; then
+    cred_host_lc=$(to_lower "$cred_host")
+    if [[ -n "$cred_host" && "$cred_host_lc" != "github.com" && "$cred_host_lc" != "gist.github.com" ]]; then
         exit 0
     fi
     if [[ -z "$cred_host" && ! -t 0 ]]; then
@@ -19,7 +28,8 @@ if [[ "$1" == "cred" ]]; then
             fi
         done
     fi
-    if [[ -n "$cred_host" && "${cred_host,,}" != "github.com" && "${cred_host,,}" != "gist.github.com" ]]; then
+    cred_host_lc=$(to_lower "$cred_host")
+    if [[ -n "$cred_host" && "$cred_host_lc" != "github.com" && "$cred_host_lc" != "gist.github.com" ]]; then
         exit 0
     fi
     if [[ -n "$target_user" && ! "$target_user" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
@@ -43,7 +53,7 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && command -v powershell.e
     exec powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
 fi
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.0.1"
 RELEASES_REPO="ThanhNguyxnOrg/git-account-switcher"
 RELEASE_WORKFLOW="ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml"
 GSWITCH_HOME="${GIT_ACCOUNT_SWITCHER_HOME:-$HOME}"
@@ -133,7 +143,10 @@ show_status() {
             local b_dir="${BASH_REMATCH[2]}"
             local b_cfg="${BASH_REMATCH[3]}"
             local clean_b="${b_dir%/}/"
-            if [[ "${curr_path,,}" == "${clean_b,,}"* ]]; then
+            local curr_path_lc clean_b_lc
+            curr_path_lc=$(to_lower "$curr_path")
+            clean_b_lc=$(to_lower "$clean_b")
+            if [[ "$curr_path_lc" == "$clean_b_lc"* ]]; then
                 matched_dir="$b_dir"
                 matched_cfg="$b_cfg"
                 break
@@ -158,7 +171,10 @@ show_status() {
         echo -e " Git Effective Email: \033[0;32m$eff_email\033[0m"
         local b_user
         b_user=$(git config -f "$matched_cfg" credential.https://github.com.username 2>/dev/null || true)
-        if [[ -n "$b_user" && "$active_gh" != "(none / not logged in)" && "${active_gh,,}" != "${b_user,,}" ]]; then
+        local active_gh_lc b_user_lc
+        active_gh_lc=$(to_lower "$active_gh")
+        b_user_lc=$(to_lower "$b_user")
+        if [[ -n "$b_user" && "$active_gh" != "(none / not logged in)" && "$active_gh_lc" != "$b_user_lc" ]]; then
             echo -e " \033[1;33m[INFO] GitHub CLI is active as '$active_gh', while this folder commits/pushes as '$b_user'.\033[0m"
             echo -e "        \033[0;90mTo switch GitHub CLI commands (gh pr, gh issue) to '$b_user', run: gswitch $b_user\033[0m"
         fi
@@ -348,16 +364,18 @@ add_account() {
         fi
     fi
 
+    local username_lc
+    username_lc=$(to_lower "$username")
     local key="$passed_key"
     if [[ -z "$key" ]]; then
         if [[ -n "$passed_user" ]]; then
-            key="${username,,}"
+            key="$username_lc"
         else
-            read -r -p "Enter role/key (e.g. work, personal, school) [default: ${username,,}]: " key
-            key=${key:-${username,,}}
+            read -r -p "Enter role/key (e.g. work, personal, school) [default: $username_lc]: " key
+            key=${key:-$username_lc}
         fi
     fi
-    key="${key,,}"
+    key=$(to_lower "$key")
     if [[ ! "$key" =~ ^[a-z0-9._-]+$ ]]; then
         echo -e "\033[0;31m[ERROR] Invalid key '$key'. Use lowercase letters, digits, dot, underscore, or hyphen.\033[0m"
         return 1
@@ -365,7 +383,7 @@ add_account() {
 
     local label=""
     if [[ -n "$passed_user" && -n "$passed_key" ]]; then
-        label="${key^}"
+        label="$(capitalize "$key")"
     else
         read -r -p "Enter display label [default: $username]: " label
         label=${label:-$username}
@@ -580,7 +598,7 @@ alias_account() {
         echo "Cancelled: alias cannot be empty."
         return
     fi
-    new_alias="${new_alias,,}"
+    new_alias=$(to_lower "$new_alias")
     if [[ ! "$new_alias" =~ ^[a-z0-9._-]+$ || "$new_alias" =~ ^[0-9]+$ ]]; then
         echo -e "\033[0;31m[ERROR] Invalid alias. Use letters, digits, dot, underscore, or hyphen; numeric aliases are reserved for indexes.\033[0m"
         return 1
@@ -912,8 +930,10 @@ unbind_folder() {
     while IFS= read -r k; do
         local k_clean
         k_clean=$(echo "$k" | sed -E 's/^includeif\.gitdir(\/i)?://; s/\.path$//')
-        local k_norm="${k_clean%/}/"
-        if [[ "${k_norm,,}" == "${pattern,,}" ]]; then
+        local k_norm="${k_clean%/}/" k_norm_lc pattern_lc
+        k_norm_lc=$(to_lower "$k_norm")
+        pattern_lc=$(to_lower "$pattern")
+        if [[ "$k_norm_lc" == "$pattern_lc" ]]; then
             local cfg_path
             cfg_path=$(git config --global --get "$k" 2>/dev/null || true)
             [[ -n "$cfg_path" ]] && removed_cfgs+=("$cfg_path")
@@ -1140,8 +1160,10 @@ except Exception as e:
             curr_p="${curr_p%/}/"
             while IFS= read -r bline; do
                 if [[ $bline =~ includeif\.gitdir(/i)?:(.*)\.path=(.*) ]]; then
-                    local cb="${BASH_REMATCH[2]%/}/"
-                    if [[ "${curr_p,,}" == "${cb,,}"* ]]; then
+                    local cb="${BASH_REMATCH[2]%/}/" curr_p_lc cb_lc
+                    curr_p_lc=$(to_lower "$curr_p")
+                    cb_lc=$(to_lower "$cb")
+                    if [[ "$curr_p_lc" == "$cb_lc"* ]]; then
                         shadowed="true"
                         echo -e "  \033[1;33m[WARN] Local repository override active ($loc_name <$loc_email>) in a bound directory!\033[0m"
                         echo -e "         This repo will NOT inherit folder binding '${BASH_REMATCH[2]}' until cleared."

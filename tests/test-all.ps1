@@ -110,13 +110,13 @@ Assert-Test "Help flag execution ('help')" {
 Assert-Test "Version command execution ('version' & '-v')" {
     $output1 = Invoke-Gswitch version
     $outStr1 = ($output1 | Out-String)
-    if ($outStr1 -notmatch "v1\.0\.0") {
-        throw "Expected version v1.0.0, got: $outStr1"
+    if ($outStr1 -notmatch "v1\.0\.1") {
+        throw "Expected version v1.0.1, got: $outStr1"
     }
     $output2 = Invoke-Gswitch -v
     $outStr2 = ($output2 | Out-String)
-    if ($outStr2 -notmatch "v1\.0\.0") {
-        throw "Expected version v1.0.0, got: $outStr2"
+    if ($outStr2 -notmatch "v1\.0\.1") {
+        throw "Expected version v1.0.1, got: $outStr2"
     }
 }
 
