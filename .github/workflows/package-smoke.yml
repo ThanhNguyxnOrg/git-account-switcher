@@ -1,0 +1,42 @@
+name: Package smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  homebrew:
+    name: Homebrew
+    runs-on: macos-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - name: Install and verify via custom tap
+        run: |
+          brew tap ThanhNguyxnOrg/gswitch https://github.com/ThanhNguyxnOrg/git-account-switcher
+          brew trust --tap ThanhNguyxnOrg/gswitch 2>/dev/null || true
+          brew install ThanhNguyxnOrg/gswitch/gswitch
+          "$(brew --prefix)/bin/gswitch" version
+          brew uninstall gswitch
+
+  scoop:
+    name: Scoop
+    runs-on: windows-latest
+    steps:
+      - name: Install Scoop
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+          iex "& {$(irm get.scoop.sh)} -RunAsAdmin"
+      - name: Install and verify via bucket
+        shell: powershell
+        run: |
+          $scoop = Join-Path $env:USERPROFILE "scoop\shims\scoop.cmd"
+          & $scoop bucket add gswitch https://github.com/ThanhNguyxnOrg/git-account-switcher
+          & $scoop install gswitch
+          $bin = Join-Path $env:USERPROFILE "scoop\shims\gswitch.cmd"
+          & $bin version
+          & $scoop uninstall gswitch
