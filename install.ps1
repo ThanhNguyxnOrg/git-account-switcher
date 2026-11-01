@@ -94,21 +94,26 @@ if ($isLocal) {
     gh attestation verify $manifest --repo $ReleasesRepo --signer-workflow $ReleaseWorkflow --deny-self-hosted-runners 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "attestation verification failed" }
 
+    $version = $tag -replace '^v', ''
+    $stage = "gswitch-v$version"
+    $archive = Join-Path $releaseTmp "$stage.zip"
+    if (-not (Test-Path $archive)) { throw "release is missing $stage.zip" }
     $manifestLines = Get-Content -Path $manifest
+    $expectedLine = $manifestLines | Where-Object { $_ -match ("^[0-9a-fA-F]{64}\s+\*?" + [regex]::Escape("$stage.zip") + "$") } | Select-Object -First 1
+    if (-not $expectedLine) { throw "SHA256SUMS has no entry for $stage.zip" }
+    $expected = ($expectedLine -split '\s+')[0].ToLower()
+    $actual = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $expected) { throw "checksum mismatch for $stage.zip" }
+    Expand-Archive -Path $archive -DestinationPath $releaseTmp -Force
     foreach ($file in $filesToCopy) {
-        $source = Join-Path $releaseTmp $file
-        if (-not (Test-Path $source)) { throw "release is missing $file" }
-        $expectedLine = $manifestLines | Where-Object { $_ -match ("^[0-9a-fA-F]{64}\s+\*?" + [regex]::Escape($file) + "$") } | Select-Object -First 1
-        if (-not $expectedLine) { throw "SHA256SUMS has no entry for $file" }
-        $expected = ($expectedLine -split '\s+')[0].ToLower()
-        $actual = (Get-FileHash -Path $source -Algorithm SHA256).Hash.ToLower()
-        if ($actual -ne $expected) { throw "checksum mismatch for $file" }
+        $source = Join-Path (Join-Path $releaseTmp $stage) "bin\$file"
+        if (-not (Test-Path $source)) { throw "archive is missing bin\$file" }
         $destFile = Join-Path $binDir $file
         Copy-Item -Path $source -Destination "$destFile.new" -Force
         Move-Item -Path "$destFile.new" -Destination $destFile -Force
         Write-Host "  [OK] Verified & installed $file" -ForegroundColor Green
     }
-    Write-Host "  [OK] Attestation and checksums verified for $tag" -ForegroundColor Green
+    Write-Host "  [OK] Attestation and archive checksum verified for $tag" -ForegroundColor Green
 }
 
 # Ensure .local\bin is in User PATH
@@ -144,8 +149,8 @@ if ((-not (Test-Path $destConfig)) -or $Force) {
     } elseif ($isLocal -and (Test-Path (Join-Path $PSScriptRoot "config\accounts.example.json"))) {
         Copy-Item -Path (Join-Path $PSScriptRoot "config\accounts.example.json") -Destination $destConfig -Force
         Write-Host "  [OK] Deployed template accounts.json -> $destConfig" -ForegroundColor Green
-    } elseif ($releaseTmp -and (Test-Path (Join-Path $releaseTmp "accounts.example.json"))) {
-        Copy-Item -Path (Join-Path $releaseTmp "accounts.example.json") -Destination $destConfig -Force
+    } elseif ($releaseTmp -and (Test-Path (Join-Path (Join-Path $releaseTmp $stage) "config\accounts.example.json"))) {
+        Copy-Item -Path (Join-Path (Join-Path $releaseTmp $stage) "config\accounts.example.json") -Destination $destConfig -Force
         Write-Host "  [OK] Deployed template accounts.json from release -> $destConfig" -ForegroundColor Green
     } else {
         [System.IO.File]::WriteAllText($destConfig, "[]", (New-Object System.Text.UTF8Encoding($false)))

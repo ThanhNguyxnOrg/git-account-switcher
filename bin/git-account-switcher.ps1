@@ -43,7 +43,7 @@ param(
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$SCRIPT_VERSION = "1.3.1"
+$SCRIPT_VERSION = "1.0.0"
 $ReleasesRepo = "ThanhNguyxnOrg/git-account-switcher"
 $ReleaseWorkflow = "ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml"
 
@@ -1170,16 +1170,17 @@ function Update-Gswitch {
             gh attestation verify $manifest --repo $ReleasesRepo --signer-workflow $ReleaseWorkflow --deny-self-hosted-runners 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "attestation verification failed" }
 
+            $version = $tag -replace '^v', ''
+            $stage = "gswitch-v$version"
+            $archive = Join-Path $tmp "$stage.zip"
+            if (-not (Test-Path $archive)) { throw "release is missing $stage.zip" }
             $manifestLines = Get-Content -Path $manifest
-            foreach ($file in $filesToUpdate) {
-                $source = Join-Path $tmp $file
-                if (-not (Test-Path $source)) { throw "release is missing $file" }
-                $expectedLine = $manifestLines | Where-Object { $_ -match ("^[0-9a-fA-F]{64}\s+\*?" + [regex]::Escape($file) + "$") } | Select-Object -First 1
-                if (-not $expectedLine) { throw "SHA256SUMS has no entry for $file" }
-                $expected = ($expectedLine -split '\s+')[0].ToLower()
-                $actual = (Get-FileHash -Path $source -Algorithm SHA256).Hash.ToLower()
-                if ($actual -ne $expected) { throw "checksum mismatch for $file" }
-            }
+            $expectedLine = $manifestLines | Where-Object { $_ -match ("^[0-9a-fA-F]{64}\s+\*?" + [regex]::Escape("$stage.zip") + "$") } | Select-Object -First 1
+            if (-not $expectedLine) { throw "SHA256SUMS has no entry for $stage.zip" }
+            $expected = ($expectedLine -split '\s+')[0].ToLower()
+            $actual = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLower()
+            if ($actual -ne $expected) { throw "checksum mismatch for $stage.zip" }
+            Expand-Archive -Path $archive -DestinationPath $tmp -Force
 
             $backups = @{}
             foreach ($file in $filesToUpdate) {
@@ -1189,11 +1190,13 @@ function Update-Gswitch {
                     Copy-Item -Path $dest -Destination $backup -Force
                     $backups[$file] = $backup
                 }
-                Copy-Item -Path (Join-Path $tmp $file) -Destination "$dest.new" -Force
+                $source = Join-Path (Join-Path $tmp $stage) "bin\$file"
+                if (-not (Test-Path $source)) { throw "archive is missing bin\$file" }
+                Copy-Item -Path $source -Destination "$dest.new" -Force
                 Move-Item -Path "$dest.new" -Destination $dest -Force
                 Write-Host "  [OK] Verified & updated $file" -ForegroundColor Green
             }
-            Write-Host "  [OK] Attestation, checksums, and replacement verified for $tag" -ForegroundColor Green
+            Write-Host "  [OK] Attestation, archive checksum, and replacement verified for $tag" -ForegroundColor Green
         } catch {
             Write-Host "[ERROR] Verified update failed: $_" -ForegroundColor Red
             foreach ($file in $filesToUpdate) {

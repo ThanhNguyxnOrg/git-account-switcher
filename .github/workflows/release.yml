@@ -43,11 +43,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           stage="gswitch-v$version"
           mkdir -p dist "dist/$stage/bin" "dist/$stage/config"
-          cp bin/git-account-switcher bin/git-account-switcher.ps1 \
-             bin/git-account-switcher.cmd bin/gswitch bin/gswitch.cmd \
-             bin/switch-git bin/switch-git.cmd bin/switch-git.ps1 \
-             install.sh install.ps1 update.sh update.ps1 uninstall.sh uninstall.ps1 \
-             config/accounts.example.json dist/
+          cp install.sh install.ps1 update.sh update.ps1 uninstall.sh uninstall.ps1 dist/
           cp bin/git-account-switcher bin/git-account-switcher.ps1 \
              bin/git-account-switcher.cmd bin/gswitch bin/gswitch.cmd \
              bin/switch-git bin/switch-git.cmd bin/switch-git.ps1 \

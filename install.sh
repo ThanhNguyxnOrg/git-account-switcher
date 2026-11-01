@@ -89,8 +89,11 @@ else
         echo "  [ERROR] sha256sum or shasum is required to verify releases." >&2
         exit 1
     fi
+    version="${TAG#v}"
+    stage="gswitch-v$version"
+    tar -xzf "$RELEASE_TMP/$stage.tar.gz" -C "$RELEASE_TMP"
     for f in git-account-switcher gswitch switch-git; do
-        cp "$RELEASE_TMP/$f" "$BIN_DIR/.$f.new.$$"
+        cp "$RELEASE_TMP/$stage/bin/$f" "$BIN_DIR/.$f.new.$$"
         chmod +x "$BIN_DIR/.$f.new.$$"
         mv -f "$BIN_DIR/.$f.new.$$" "$BIN_DIR/$f"
     done
@@ -119,8 +122,8 @@ if [[ ! -f "$CONFIG_DIR/accounts.json" ]]; then
     elif [[ "$IS_LOCAL" == "true" && -f "$SCRIPT_DIR/config/accounts.example.json" ]]; then
         cp "$SCRIPT_DIR/config/accounts.example.json" "$CONFIG_DIR/accounts.json"
         echo "  [OK] Deployed template accounts.json -> $CONFIG_DIR/accounts.json"
-    elif [[ -n "$RELEASE_TMP" && -f "$RELEASE_TMP/accounts.example.json" ]]; then
-        cp "$RELEASE_TMP/accounts.example.json" "$CONFIG_DIR/accounts.json"
+    elif [[ -n "$RELEASE_TMP" && -f "$RELEASE_TMP/$stage/config/accounts.example.json" ]]; then
+        cp "$RELEASE_TMP/$stage/config/accounts.example.json" "$CONFIG_DIR/accounts.json"
         echo "  [OK] Deployed template accounts.json from release -> $CONFIG_DIR/accounts.json"
     else
         echo "[]" > "$CONFIG_DIR/accounts.json"
