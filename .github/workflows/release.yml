@@ -21,7 +21,7 @@ jobs:
           app-id: ${{ secrets.BOT_APP_ID }}
           private-key: ${{ secrets.BOT_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: "git-account-switcher,homebrew-tap,scoop-bucket"
+          repositories: "git-account-switcher,homebrew-tap"
           permission-contents: write
 
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -130,4 +130,4 @@ jobs:
             fi
           }
           update_file homebrew-tap Formula/gswitch.rb dist/gswitch.rb "chore: gswitch v$version"
-          update_file scoop-bucket bucket/gswitch.json dist/gswitch.json "chore: gswitch v$version"
+          update_file homebrew-tap bucket/gswitch.json dist/gswitch.json "chore: gswitch v$version"

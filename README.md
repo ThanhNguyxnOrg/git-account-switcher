@@ -129,7 +129,7 @@ brew upgrade gswitch
 
 ```powershell
 # Windows (Scoop)
-scoop bucket add thanhnguyxn https://github.com/ThanhNguyxnOrg/scoop-bucket
+scoop bucket add thanhnguyxn https://github.com/ThanhNguyxnOrg/homebrew-tap
 scoop install gswitch
 scoop update gswitch
 ```
