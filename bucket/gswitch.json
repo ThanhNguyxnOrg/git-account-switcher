@@ -1,11 +1,11 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "Fast multi-account GitHub and Git identity switcher",
   "homepage": "https://github.com/ThanhNguyxnOrg/git-account-switcher",
   "license": "MIT",
-  "url": "https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/download/v1.0.1/gswitch-v1.0.1.zip",
-  "hash": "6207bc8e0dcdd813c3ff17b97db7d5285fb5d0abd91372488be4187a8d91bf28",
-  "extract_dir": "gswitch-v1.0.1",
+  "url": "https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/download/v1.0.0/gswitch-v1.0.0.zip",
+  "hash": "2b5654354e3c89f8f5d566b908d02bf2fd97f2f8e0018abb70402efee58ccb2f",
+  "extract_dir": "gswitch-v1.0.0",
   "bin": [
     ["bin\\gswitch.cmd", "gswitch"],
     ["bin\\git-account-switcher.cmd", "git-account-switcher"],
