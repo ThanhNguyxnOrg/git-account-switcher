@@ -261,6 +261,23 @@ gswitch remove 2 -f
 
 ---
 
+### Package Manager Upgrades
+
+If gswitch was installed through a package manager, use that manager for upgrades:
+
+```bash
+brew upgrade ThanhNguyxnOrg/gswitch/gswitch
+```
+
+```powershell
+scoop update gswitch
+choco upgrade gswitch -y
+```
+
+Do not run `gswitch update` for package-managed installs; it is intended for direct release installs.
+
+---
+
 ## Related Documentation
 
 - ⚙️ [Configuration & Schema Guide](configuration.md)

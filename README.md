@@ -82,7 +82,7 @@ curl -fsSL https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/lates
 Pin a release and verify its GitHub build provenance before executing it:
 
 ```bash
-TAG="v1.0.1"
+TAG="v1.0.0"
 gh release download "$TAG" --repo ThanhNguyxnOrg/git-account-switcher --pattern install.sh --dir /tmp/gswitch-install
 gh attestation verify /tmp/gswitch-install/install.sh \
   --repo ThanhNguyxnOrg/git-account-switcher \
@@ -135,6 +135,12 @@ brew upgrade ThanhNguyxnOrg/gswitch/gswitch
 scoop bucket add gswitch https://github.com/ThanhNguyxnOrg/git-account-switcher
 scoop install gswitch
 scoop update gswitch
+```
+
+```powershell
+# Windows (Chocolatey)
+choco install gswitch -y
+choco upgrade gswitch -y
 ```
 
 If installed through a package manager, use that package manager for upgrades. `gswitch update` is for direct release installs.

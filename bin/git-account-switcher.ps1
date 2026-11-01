@@ -43,7 +43,7 @@ param(
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$SCRIPT_VERSION = "1.0.1"
+$SCRIPT_VERSION = "1.0.0"
 $ReleasesRepo = "ThanhNguyxnOrg/git-account-switcher"
 $ReleaseWorkflow = "ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml"
 

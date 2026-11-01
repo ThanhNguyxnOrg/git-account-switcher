@@ -127,12 +127,13 @@ The test suites verify:
 
 ## 🚀 Releasing
 
-Releases are built by `.github/workflows/release.yml` on tags like `v1.0.1`:
+Releases are built by `.github/workflows/release.yml` on tags like `v1.0.0`:
 
 1. Bump `SCRIPT_VERSION` in both `bin/git-account-switcher` and `bin/git-account-switcher.ps1`.
 2. Confirm the tag version matches both scripts (the workflow fails otherwise).
 3. Push the tag. The workflow stages the binaries/config template, builds `gswitch-vX.Y.Z.tar.gz` / `.zip`, generates `gswitch.rb` (Homebrew) and `gswitch.json` (Scoop) manifests, writes `SHA256SUMS`, creates GitHub build-provenance attestations, and publishes the release as the **ThanhNguyxnAgent** GitHub App using `BOT_APP_ID` / `BOT_PRIVATE_KEY` (app token scoped to `contents: write`).
 4. `install.sh` / `install.ps1` and `gswitch update` verify `SHA256SUMS` and the attestation with `gh attestation verify` before replacing files.
+5. The Chocolatey job packs `gswitch.<version>.nupkg`, smoke-tests a local install, and pushes it to `https://push.chocolatey.org/` using the org secret `CHOCO_API_KEY`. Package metadata for Homebrew/Scoop lives in `Formula/` and `bucket/` in this repository; there is no separate package repo.
 
 Never install or update from a mutable `master` URL; use a release tag and verify provenance.
 

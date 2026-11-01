@@ -115,19 +115,93 @@ jobs:
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           update_file() {
-            repo="$1"
-            path="$2"
-            src="$3"
-            msg="$4"
+            path="$1"
+            src="$2"
+            msg="$3"
             content="$(base64 -w0 "$src")"
-            sha="$(gh api "repos/ThanhNguyxnOrg/$repo/contents/$path" --jq .sha 2>/dev/null || true)"
+            sha="$(gh api "repos/$GITHUB_REPOSITORY/contents/$path" --jq .sha 2>/dev/null || true)"
             if [[ -n "$sha" ]]; then
-              gh api --method PUT "repos/ThanhNguyxnOrg/$repo/contents/$path" \
-                -f message="$msg" -f content="$content" -f sha="$sha" -f branch=main >/dev/null
+              gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path" \
+                -f message="$msg" -f content="$content" -f sha="$sha" -f branch=master >/dev/null
             else
-              gh api --method PUT "repos/ThanhNguyxnOrg/$repo/contents/$path" \
-                -f message="$msg" -f content="$content" -f branch=main >/dev/null
+              gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/$path" \
+                -f message="$msg" -f content="$content" -f branch=master >/dev/null
             fi
           }
           update_file Formula/gswitch.rb dist/gswitch.rb "chore: gswitch v$version"
           update_file bucket/gswitch.json dist/gswitch.json "chore: gswitch v$version"
+
+  chocolatey:
+    name: Chocolatey
+    needs: release
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Pack, smoke-test, and publish
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = "${{ github.ref_name }}".TrimStart('v')
+          $zipName = "gswitch-v$version.zip"
+          $root = Join-Path $env:RUNNER_TEMP "gswitch-choco"
+          $pkg = Join-Path $root "package"
+          New-Item -ItemType Directory -Path (Join-Path $pkg "tools") -Force | Out-Null
+          gh release download "${{ github.ref_name }}" --repo "${{ github.repository }}" --pattern $zipName --dir $root --clobber
+          gh attestation verify (Join-Path $root $zipName) --repo "${{ github.repository }}" --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" --deny-self-hosted-runners
+          $hash = (Get-FileHash (Join-Path $root $zipName) -Algorithm SHA256).Hash.ToLower()
+          $url = "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$zipName"
+          $nuspec = @'
+          <?xml version="1.0" encoding="utf-8"?>
+          <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+            <metadata>
+              <id>gswitch</id>
+              <version>__VERSION__</version>
+              <title>git-account-switcher</title>
+              <authors>ThanhNguyxn</authors>
+              <owners>ThanhNguyxn</owners>
+              <projectUrl>https://github.com/ThanhNguyxnOrg/git-account-switcher</projectUrl>
+              <licenseUrl>https://github.com/ThanhNguyxnOrg/git-account-switcher/blob/master/LICENSE</licenseUrl>
+              <requireLicenseAcceptance>false</requireLicenseAcceptance>
+              <description>Fast multi-account GitHub and Git identity switcher.</description>
+              <tags>git github account switch</tags>
+            </metadata>
+            <files>
+              <file src="tools\**" target="tools" />
+            </files>
+          </package>
+          '@
+          $nuspec = $nuspec.Replace('__VERSION__', $version)
+          Set-Content -Path (Join-Path $pkg 'gswitch.nuspec') -Value $nuspec -Encoding UTF8
+          $install = @'
+          $ErrorActionPreference = 'Stop'
+          $toolsDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+          Install-ChocolateyZipPackage -PackageName 'gswitch' -Url64bit '__URL__' -Checksum64 '__HASH__' -ChecksumType64 'sha256' -UnzipLocation $toolsDir
+          $binDir = Join-Path $toolsDir 'gswitch-v__VERSION__\bin'
+          Install-BinFile -Name 'gswitch' -Path (Join-Path $binDir 'gswitch.cmd')
+          Install-BinFile -Name 'git-account-switcher' -Path (Join-Path $binDir 'git-account-switcher.cmd')
+          Install-BinFile -Name 'switch-git' -Path (Join-Path $binDir 'switch-git.cmd')
+          '@
+          $install = $install.Replace('__URL__', $url).Replace('__HASH__', $hash).Replace('__VERSION__', $version)
+          Set-Content -Path (Join-Path $pkg 'tools\chocolateyInstall.ps1') -Value $install -Encoding UTF8
+          $uninstall = @'
+          $ErrorActionPreference = 'Stop'
+          Uninstall-BinFile -Name 'gswitch'
+          Uninstall-BinFile -Name 'git-account-switcher'
+          Uninstall-BinFile -Name 'switch-git'
+          '@
+          Set-Content -Path (Join-Path $pkg 'tools\chocolateyUninstall.ps1') -Value $uninstall -Encoding UTF8
+          Push-Location $pkg
+          choco pack gswitch.nuspec --output-directory $root
+          Pop-Location
+          choco install gswitch --version $version --source $root -y --no-progress
+          $shim = Join-Path $env:ChocolateyInstall 'bin\gswitch.exe'
+          if (-not (Test-Path $shim)) { throw "Chocolatey shim not found: $shim" }
+          $out = & $shim version
+          if ($out -notmatch [regex]::Escape("v$version")) { throw "smoke test failed: $out" }
+          choco uninstall gswitch -y --no-progress
+          if (-not $env:CHOCO_API_KEY) { throw "CHOCO_API_KEY is not set" }
+          choco push (Join-Path $root "gswitch.$version.nupkg") --source https://push.chocolatey.org/ --api-key $env:CHOCO_API_KEY
