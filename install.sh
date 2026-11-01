@@ -4,6 +4,19 @@
 # ==============================================================================
 set -e
 
+if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* ]]; then
+    echo "[ERROR] Windows detected. Use install.ps1 from PowerShell instead of install.sh." >&2
+    exit 1
+fi
+
+RELEASES_REPO="ThanhNguyxnOrg/git-account-switcher"
+RELEASE_WORKFLOW="ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml"
+RELEASE_TMP=""
+cleanup() {
+    [[ -n "$RELEASE_TMP" ]] && rm -rf "$RELEASE_TMP"
+}
+trap cleanup EXIT
+
 echo ""
 echo "============================================================"
 echo " git-account-switcher (gswitch) Installer (macOS & Linux)"
@@ -26,12 +39,18 @@ if ! command -v gh >/dev/null 2>&1; then
 fi
 echo "  [OK] GitHub CLI (gh) is available."
 
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "  [ERROR] Python 3 is required to manage accounts.json." >&2
+    echo "          macOS: xcode-select --install   Linux: install the python3 package" >&2
+    exit 1
+fi
+echo "  [OK] Python 3 is available."
+
 # 2. Target bin directory
-BIN_DIR="$HOME/.local/bin"
+BIN_DIR="${GIT_ACCOUNT_SWITCHER_HOME:-$HOME}/.local/bin"
 echo "[2/5] Preparing installation directory ($BIN_DIR)..."
 mkdir -p "$BIN_DIR"
 
-RAW_BASE="https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master"
 IS_LOCAL=false
 if [[ -n "${BASH_SOURCE[0]}" && -d "$(dirname "${BASH_SOURCE[0]}")/bin" ]]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,14 +58,43 @@ if [[ -n "${BASH_SOURCE[0]}" && -d "$(dirname "${BASH_SOURCE[0]}")/bin" ]]; then
 fi
 
 if [[ "$IS_LOCAL" == "true" ]]; then
-    cp "$SCRIPT_DIR/bin/git-account-switcher" "$BIN_DIR/git-account-switcher"
-    cp "$SCRIPT_DIR/bin/gswitch" "$BIN_DIR/gswitch"
-    cp "$SCRIPT_DIR/bin/switch-git" "$BIN_DIR/switch-git"
+    for f in git-account-switcher gswitch switch-git; do
+        cp "$SCRIPT_DIR/bin/$f" "$BIN_DIR/.$f.new.$$"
+        chmod +x "$BIN_DIR/.$f.new.$$"
+        mv -f "$BIN_DIR/.$f.new.$$" "$BIN_DIR/$f"
+    done
 else
-    echo "  Downloading binaries from GitHub repository..."
-    curl -fsSL "$RAW_BASE/bin/git-account-switcher" -o "$BIN_DIR/git-account-switcher"
-    curl -fsSL "$RAW_BASE/bin/gswitch" -o "$BIN_DIR/gswitch"
-    curl -fsSL "$RAW_BASE/bin/switch-git" -o "$BIN_DIR/switch-git"
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "  [ERROR] GitHub CLI (gh) is required to verify release assets." >&2
+        exit 1
+    fi
+    TAG="${GSWITCH_INSTALL_TAG:-$(gh release view --repo "$RELEASES_REPO" --json tagName --jq '.tagName' 2>/dev/null || true)}"
+    if [[ -z "$TAG" ]]; then
+        echo "  [ERROR] No GitHub release found for $RELEASES_REPO." >&2
+        echo "          Create a v* release with attested assets, or set GSWITCH_INSTALL_TAG." >&2
+        exit 1
+    fi
+    RELEASE_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gswitch-install.XXXXXX")
+    echo "  Downloading verified release $TAG..."
+    gh release download "$TAG" --repo "$RELEASES_REPO" --dir "$RELEASE_TMP" --clobber >/dev/null
+    if ! gh attestation verify "$RELEASE_TMP/SHA256SUMS" --repo "$RELEASES_REPO" --signer-workflow "$RELEASE_WORKFLOW" --deny-self-hosted-runners >/dev/null 2>&1; then
+        echo "  [ERROR] Release attestation verification failed." >&2
+        exit 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        (cd "$RELEASE_TMP" && sha256sum -c SHA256SUMS >/dev/null) || { echo "  [ERROR] Checksum verification failed." >&2; exit 1; }
+    elif command -v shasum >/dev/null 2>&1; then
+        (cd "$RELEASE_TMP" && shasum -a 256 -c SHA256SUMS >/dev/null) || { echo "  [ERROR] Checksum verification failed." >&2; exit 1; }
+    else
+        echo "  [ERROR] sha256sum or shasum is required to verify releases." >&2
+        exit 1
+    fi
+    for f in git-account-switcher gswitch switch-git; do
+        cp "$RELEASE_TMP/$f" "$BIN_DIR/.$f.new.$$"
+        chmod +x "$BIN_DIR/.$f.new.$$"
+        mv -f "$BIN_DIR/.$f.new.$$" "$BIN_DIR/$f"
+    done
+    echo "  [OK] Attestation and checksums verified for $TAG"
 fi
 
 chmod +x "$BIN_DIR/git-account-switcher" "$BIN_DIR/gswitch" "$BIN_DIR/switch-git"
@@ -61,7 +109,7 @@ fi
 
 # 3. Setup configuration directory
 echo "[3/5] Setting up accounts configuration..."
-CONFIG_DIR="$HOME/.config/git-account-switcher"
+CONFIG_DIR="${GIT_ACCOUNT_SWITCHER_HOME:-$HOME}/.config/git-account-switcher"
 mkdir -p "$CONFIG_DIR"
 
 if [[ ! -f "$CONFIG_DIR/accounts.json" ]]; then
@@ -71,10 +119,12 @@ if [[ ! -f "$CONFIG_DIR/accounts.json" ]]; then
     elif [[ "$IS_LOCAL" == "true" && -f "$SCRIPT_DIR/config/accounts.example.json" ]]; then
         cp "$SCRIPT_DIR/config/accounts.example.json" "$CONFIG_DIR/accounts.json"
         echo "  [OK] Deployed template accounts.json -> $CONFIG_DIR/accounts.json"
+    elif [[ -n "$RELEASE_TMP" && -f "$RELEASE_TMP/accounts.example.json" ]]; then
+        cp "$RELEASE_TMP/accounts.example.json" "$CONFIG_DIR/accounts.json"
+        echo "  [OK] Deployed template accounts.json from release -> $CONFIG_DIR/accounts.json"
     else
-        echo "  Deploying default configuration template..."
-        curl -fsSL "$RAW_BASE/config/accounts.example.json" -o "$CONFIG_DIR/accounts.json" 2>/dev/null || echo "[]" > "$CONFIG_DIR/accounts.json"
-        echo "  [OK] Deployed template accounts.json -> $CONFIG_DIR/accounts.json"
+        echo "[]" > "$CONFIG_DIR/accounts.json"
+        echo "  [OK] Initialized empty accounts.json -> $CONFIG_DIR/accounts.json"
     fi
 else
     echo "  [INFO] Existing configuration preserved at $CONFIG_DIR/accounts.json"

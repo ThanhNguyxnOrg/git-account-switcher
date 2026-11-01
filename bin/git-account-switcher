@@ -7,13 +7,23 @@
 if [[ "$1" == "cred" ]]; then
     target_user="$2"
     action="$3"
-    if [[ -z "$target_user" ]]; then
-        while IFS= read -r line; do
-            if [[ $line =~ ^username=(.+)$ ]]; then
+    cred_host="$4"
+    if [[ -n "$cred_host" && "${cred_host,,}" != "github.com" && "${cred_host,,}" != "gist.github.com" ]]; then
+        exit 0
+    fi
+    if [[ -z "$cred_host" && ! -t 0 ]]; then
+        while IFS= read -r -t 1 line; do
+            [[ $line =~ ^host=(.+)$ ]] && cred_host="${BASH_REMATCH[1]}"
+            if [[ -z "$target_user" && $line =~ ^username=(.+)$ ]]; then
                 target_user="${BASH_REMATCH[1]}"
-                break
             fi
         done
+    fi
+    if [[ -n "$cred_host" && "${cred_host,,}" != "github.com" && "${cred_host,,}" != "gist.github.com" ]]; then
+        exit 0
+    fi
+    if [[ -n "$target_user" && ! "$target_user" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        exit 0
     fi
     if [[ "$action" == "get" || -z "$action" ]]; then
         if [[ -n "$target_user" ]]; then
@@ -33,10 +43,36 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" ]] && command -v powershell.e
     exec powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File "$SCRIPT_DIR/git-account-switcher.ps1" "$@"
 fi
 
-SCRIPT_VERSION="1.2.0"
-RAW_BASE="https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master"
-CONFIG_FILE="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
+SCRIPT_VERSION="1.3.0"
+RELEASES_REPO="ThanhNguyxnOrg/git-account-switcher"
+RELEASE_WORKFLOW="ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml"
+GSWITCH_HOME="${GIT_ACCOUNT_SWITCHER_HOME:-$HOME}"
+PYTHON_BIN="${GIT_ACCOUNT_SWITCHER_PYTHON:-python3}"
+CONFIG_FILE="${GIT_ACCOUNT_SWITCHER_CONFIG:-$GSWITCH_HOME/.config/git-account-switcher/accounts.json}"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
+export GIT_ACCOUNT_SWITCHER_CONFIG="$CONFIG_FILE"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SELF_SCRIPT="$SELF_DIR/git-account-switcher"
+if [[ ! -f "$SELF_SCRIPT" ]]; then
+    SELF_SCRIPT="$(command -v git-account-switcher 2>/dev/null || printf '%s' "$SELF_SCRIPT")"
+fi
+
+require_python() {
+    if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+        echo -e "\033[0;31m[ERROR] Python 3 is required for this command.\033[0m" >&2
+        echo "        Install Python 3 and ensure '$PYTHON_BIN' is in PATH." >&2
+        return 1
+    fi
+}
+
+sh_single_quote() {
+    "$PYTHON_BIN" -c 'import shlex,sys; print(shlex.quote(sys.argv[1]))' "$1" 2>/dev/null || printf "'%s'" "$1"
+}
+
+cred_helper_command() {
+    local user="$1"
+    printf '!%s cred %s get github.com' "$(sh_single_quote "$SELF_SCRIPT")" "$(sh_single_quote "$user")"
+}
 
 get_active_gh_user() {
     local u
@@ -128,7 +164,7 @@ show_status() {
         fi
     elif [[ -n "$eff_email" && ("$eff_email" != "$global_email" || "$eff_name" != "$global_name") ]]; then
         echo " ------------------------------------------------------------"
-        echo -e " \033[1;33m[Folder includeIf Binding Active in this directory]\033[0m"
+        echo -e " \033[1;33m[Effective identity differs from global settings]\033[0m"
         echo -e " Git Effective Name : \033[1;33m$eff_name\033[0m"
         echo -e " Git Effective Email: \033[1;33m$eff_email\033[0m"
     fi
@@ -161,12 +197,12 @@ show_list() {
     echo -e "\033[1;33mConfigured Account Profiles:\033[0m"
     echo "================================================================================"
 
-    if [[ -f "$CONFIG_FILE" ]] && command -v python3 >/dev/null 2>&1; then
-        python3 -c "
-import json, sys
+    if [[ -f "$CONFIG_FILE" ]] && command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+        "$PYTHON_BIN" -c "
+import json, os, sys
 active = sys.argv[1].lower()
 try:
-    with open('$CONFIG_FILE') as f:
+    with open(os.environ['GIT_ACCOUNT_SWITCHER_CONFIG'], encoding='utf-8-sig') as f:
         accounts = json.load(f)
     if not accounts:
         print('[INFO] No accounts configured yet. Run \"gswitch setup\" to add accounts.')
@@ -186,13 +222,18 @@ except Exception:
     elif [[ -f "$CONFIG_FILE" ]] && command -v jq >/dev/null 2>&1; then
         jq -r '.[] | "   [\(.index)] \(.label) (\(.username)) - \(.email) - Aliases: \(.aliases | join(", "))"' "$CONFIG_FILE"
     else
-        echo "No accounts configuration found at $CONFIG_FILE. Run 'gswitch setup'."
+        if [[ -f "$CONFIG_FILE" ]]; then
+            echo -e "\033[0;31m[ERROR] Python 3 (or jq) is required to read $CONFIG_FILE.\033[0m" >&2
+        else
+            echo "No accounts configuration found at $CONFIG_FILE. Run 'gswitch setup'."
+        fi
     fi
     echo "================================================================================"
     echo ""
 }
 
 sync_from_gh() {
+    require_python || return 1
     echo ""
     echo -e "\033[0;36mScanning GitHub CLI for authenticated accounts...\033[0m"
     
@@ -211,62 +252,71 @@ sync_from_gh() {
     echo -e "\033[0;32mFound ${#accounts[@]} account(s): ${accounts[*]}\033[0m"
     mkdir -p "$CONFIG_DIR"
 
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import json, os, sys, subprocess
 
+cfg = os.environ['GIT_ACCOUNT_SWITCHER_CONFIG']
 accounts = sys.argv[1:]
 existing = []
-if os.path.exists('$CONFIG_FILE'):
+if os.path.exists(cfg):
     try:
-        with open('$CONFIG_FILE') as f:
+        with open(os.environ['GIT_ACCOUNT_SWITCHER_CONFIG'], encoding='utf-8-sig') as f:
             existing = json.load(f)
     except Exception:
         pass
 
-result = []
-for idx, user in enumerate(accounts, 1):
+result = list(existing)
+detected = []
+for user in accounts:
+    if user.lower() not in [x.lower() for x in detected]:
+        detected.append(user)
+
+for user in detected:
     matched = None
-    for ex in existing:
+    for ex in result:
         if ex.get('username', '').lower() == user.lower():
             matched = ex
             break
     if matched:
-        aliases = [str(x) for x in matched.get('aliases', []) if not str(x).isdigit()]
-        if str(idx) not in aliases:
-            aliases.insert(0, str(idx))
-        matched['index'] = idx
-        matched['aliases'] = aliases
-        result.append(matched)
-    else:
-        uid = 0
-        uname = user
-        try:
-            out = subprocess.check_output(['gh', 'api', f'users/{user}'], stderr=subprocess.DEVNULL)
-            info = json.loads(out)
-            uid = info.get('id', 0)
-            uname = info.get('name') or user
-        except Exception:
-            pass
-        email = f'{uid}+{user}@users.noreply.github.com' if uid else f'{user}@users.noreply.github.com'
-        result.append({
-            'index': idx,
-            'key': user.lower(),
-            'aliases': [str(idx), user.lower()],
-            'label': user,
-            'username': user,
-            'name': uname,
-            'email': email,
-            'description': f'GitHub account {user}'
-        })
+        continue
+    uid = 0
+    uname = user
+    try:
+        out = subprocess.check_output(['gh', 'api', f'users/{user}'], stderr=subprocess.DEVNULL)
+        info = json.loads(out)
+        uid = info.get('id', 0)
+        uname = info.get('name') or user
+    except Exception:
+        pass
+    email = f'{uid}+{user}@users.noreply.github.com' if uid else f'{user}@users.noreply.github.com'
+    result.append({
+        'key': user.lower(),
+        'label': user,
+        'username': user,
+        'name': uname,
+        'email': email,
+        'description': f'GitHub account {user}'
+    })
 
-with open('$CONFIG_FILE', 'w') as f:
+for idx, a in enumerate(result, 1):
+    a['index'] = idx
+    aliases = [str(x) for x in a.get('aliases', []) if not str(x).isdigit()]
+    for required in (a.get('key', ''), a.get('username', '')):
+        if required and required.lower() not in aliases:
+            aliases.append(required.lower())
+    a['aliases'] = [str(idx)] + aliases
+
+tmp = cfg + '.tmp'
+with open(tmp, 'w', encoding='utf-8') as f:
     json.dump(result, f, indent=2)
-print(f'[OK] Successfully synced {len(result)} accounts to $CONFIG_FILE!')
+os.replace(tmp, cfg)
+print(f'[OK] Synced {len(detected)} authenticated account(s); {len(result)} profile(s) preserved in {cfg}.')
 " "${accounts[@]}"
     show_list
 }
 
 add_account() {
+    require_python || return 1
     local passed_user="$1"
     local passed_key="$2"
     local passed_name="$3"
@@ -283,14 +333,18 @@ add_account() {
         echo "Cancelled: username cannot be empty."
         return
     fi
+    if [[ ! "$username" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        echo -e "\033[0;31m[ERROR] Invalid GitHub username: use letters, digits, dot, underscore, or hyphen.\033[0m"
+        return 1
+    fi
 
     local uid="0"
     local uname="$username"
     if command -v gh >/dev/null 2>&1; then
         out=$(gh api "users/$username" 2>/dev/null || true)
         if [[ -n "$out" ]]; then
-            uid=$(python3 -c "import json, sys; print(json.loads(sys.argv[1]).get('id', 0))" "$out" 2>/dev/null || echo "0")
-            uname=$(python3 -c "import json, sys; print(json.loads(sys.argv[1]).get('name') or sys.argv[2])" "$out" "$username" 2>/dev/null || echo "$username")
+            uid=$("$PYTHON_BIN" -c "import json, sys; print(json.loads(sys.argv[1]).get('id', 0))" "$out" 2>/dev/null || echo "0")
+            uname=$("$PYTHON_BIN" -c "import json, sys; print(json.loads(sys.argv[1]).get('name') or sys.argv[2])" "$out" "$username" 2>/dev/null || echo "$username")
         fi
     fi
 
@@ -302,6 +356,11 @@ add_account() {
             read -r -p "Enter role/key (e.g. work, personal, school) [default: ${username,,}]: " key
             key=${key:-${username,,}}
         fi
+    fi
+    key="${key,,}"
+    if [[ ! "$key" =~ ^[a-z0-9._-]+$ ]]; then
+        echo -e "\033[0;31m[ERROR] Invalid key '$key'. Use lowercase letters, digits, dot, underscore, or hyphen.\033[0m"
+        return 1
     fi
 
     local label=""
@@ -339,20 +398,29 @@ add_account() {
         fi
     fi
 
+    if [[ "$commit_name" == *$'\n'* || "$commit_name" == *$'\r'* ]]; then
+        echo -e "\033[0;31m[ERROR] Commit author name cannot contain newlines.\033[0m"
+        return 1
+    fi
+    if [[ "$commit_email" == *$'\n'* || "$commit_email" == *$'\r'* ]]; then
+        echo -e "\033[0;31m[ERROR] Commit email cannot contain newlines.\033[0m"
+        return 1
+    fi
+
     local custom_aliases=""
     if [[ -z "$passed_user" || -z "$passed_key" ]]; then
         read -r -p "Enter additional shortcut aliases (comma-separated, e.g. 'work, w, corp') [optional]: " custom_aliases
     fi
 
     mkdir -p "$CONFIG_DIR"
-    python3 -c "
+    "$PYTHON_BIN" -c "
 import json, os, sys
-cfg = '$CONFIG_FILE'
+cfg = os.environ['GIT_ACCOUNT_SWITCHER_CONFIG']
 data = []
 if os.path.exists(cfg):
     try:
-        with open(cfg) as f: data = json.load(f)
-    except: pass
+        with open(cfg, encoding='utf-8-sig') as f: data = json.load(f)
+    except Exception: pass
 
 u = sys.argv[1]
 k = sys.argv[2].lower()
@@ -361,28 +429,47 @@ cn = sys.argv[4]
 ce = sys.argv[5]
 extra_al = sys.argv[6] if len(sys.argv) > 6 else ''
 
-# Remove existing if same key or username to prevent duplicates
-data = [a for a in data if a.get('key','').lower() != k and a.get('username','').lower() != u.lower()]
+match = None
+for a in data:
+    if a.get('key','').lower() == k or a.get('username','').lower() == u.lower():
+        match = a
+        break
 
-idx = len(data) + 1
-aliases = [str(idx), k, u.lower()]
+if match:
+    match.update({'key': k, 'label': lbl, 'username': u, 'name': cn, 'email': ce})
+    if not match.get('description'):
+        match['description'] = f'{lbl} account ({u})'
+    aliases = [str(x) for x in match.get('aliases', []) if not str(x).isdigit()]
+else:
+    match = {
+        'key': k,
+        'label': lbl,
+        'username': u,
+        'name': cn,
+        'email': ce,
+        'description': f'{lbl} account ({u})'
+    }
+    aliases = []
+    data.append(match)
+
+for required in (k, u.lower()):
+    if required and required not in aliases:
+        aliases.append(required)
 if extra_al:
     for part in extra_al.replace(',', ' ').split():
         p = part.strip().lower()
         if p and p not in aliases:
             aliases.append(p)
 
-data.append({
-    'index': idx,
-    'key': k,
-    'aliases': aliases,
-    'label': lbl,
-    'username': u,
-    'name': cn,
-    'email': ce,
-    'description': f'{lbl} account ({u})'
-})
-with open(cfg, 'w') as f: json.dump(data, f, indent=2)
+match['aliases'] = aliases
+for idx, a in enumerate(data, 1):
+    a['index'] = idx
+    rest = [str(x) for x in a.get('aliases', []) if not str(x).isdigit()]
+    a['aliases'] = [str(idx)] + [x for x in rest if x != str(idx)]
+
+tmp = cfg + '.tmp'
+with open(tmp, 'w', encoding='utf-8') as f: json.dump(data, f, indent=2)
+os.replace(tmp, cfg)
 print(f'[OK] Account \'{lbl}\' ({u}) successfully configured!')
 " "$username" "$key" "$label" "$commit_name" "$commit_email" "$custom_aliases"
 
@@ -390,6 +477,7 @@ print(f'[OK] Account \'{lbl}\' ({u}) successfully configured!')
 }
 
 remove_account() {
+    require_python || return 1
     local target="$1"
     local force="$2"
 
@@ -402,11 +490,11 @@ remove_account() {
         return
     fi
 
-    python3 -c "
-import json, sys
-cfg = '$CONFIG_FILE'
+    "$PYTHON_BIN" -c "
+import json, os, re, sys, subprocess
+cfg = os.environ['GIT_ACCOUNT_SWITCHER_CONFIG']
 try:
-    with open(cfg) as f: data = json.load(f)
+    with open(cfg, encoding='utf-8-sig') as f: data = json.load(f)
 except Exception:
     print('[ERROR] Config file not found.')
     sys.exit(1)
@@ -430,13 +518,40 @@ if not proceed:
     proceed = (conf.strip().lower() == 'y')
 
 if proceed:
+    key = match.get('key','')
+    if not re.match(r'^[a-z0-9._-]+$', key):
+        key = ''
+    home = os.environ.get('GIT_ACCOUNT_SWITCHER_HOME', os.path.expanduser('~'))
+    profile = os.path.join(home, '.gitconfig-' + key)
+    def norm(p): return p.replace('\\\\', '/').lower()
+    removed = 0
+    try:
+        keys = subprocess.run(['git','config','--global','--name-only','--get-regexp','^includeif\\\\.gitdir'], capture_output=True, text=True)
+        for k in keys.stdout.splitlines():
+            k = k.strip()
+            if not k:
+                continue
+            val = subprocess.run(['git','config','--global','--get',k], capture_output=True, text=True).stdout.strip()
+            if val and norm(val).endswith('/.gitconfig-' + key.lower()):
+                subprocess.run(['git','config','--global','--unset-all',k], check=False, capture_output=True)
+                removed += 1
+    except Exception:
+        pass
+    if removed:
+        remaining = subprocess.run(['git','config','--global','--get-regexp','^includeif\\\\.gitdir'], capture_output=True, text=True).stdout
+        if norm(profile) not in norm(remaining) and os.path.exists(profile):
+            try: os.remove(profile)
+            except OSError: pass
+        print(f'[INFO] Removed {removed} folder binding(s) for {key}.')
     data = [a for a in data if a != match]
     for idx, a in enumerate(data, 1):
         a['index'] = idx
         cleaned_aliases = [str(x) for x in a.get('aliases', []) if not str(x).isdigit()]
         cleaned_aliases.insert(0, str(idx))
         a['aliases'] = cleaned_aliases
-    with open(cfg, 'w') as f: json.dump(data, f, indent=2)
+    tmp = cfg + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f: json.dump(data, f, indent=2)
+    os.replace(tmp, cfg)
     print(f\"\n[OK] Account '{match['label']}' ({match['username']}) removed successfully.\")
 else:
     print('Cancelled.')
@@ -445,6 +560,7 @@ else:
 }
 
 alias_account() {
+    require_python || return 1
     local target="$1"
     local new_alias="$2"
 
@@ -464,12 +580,17 @@ alias_account() {
         echo "Cancelled: alias cannot be empty."
         return
     fi
+    new_alias="${new_alias,,}"
+    if [[ ! "$new_alias" =~ ^[a-z0-9._-]+$ || "$new_alias" =~ ^[0-9]+$ ]]; then
+        echo -e "\033[0;31m[ERROR] Invalid alias. Use letters, digits, dot, underscore, or hyphen; numeric aliases are reserved for indexes.\033[0m"
+        return 1
+    fi
 
-    python3 -c "
-import json, sys
-cfg = '$CONFIG_FILE'
+    "$PYTHON_BIN" -c "
+import json, os, sys
+cfg = os.environ['GIT_ACCOUNT_SWITCHER_CONFIG']
 try:
-    with open(cfg) as f: data = json.load(f)
+    with open(cfg, encoding='utf-8-sig') as f: data = json.load(f)
 except Exception:
     print('[ERROR] Config file not found.')
     sys.exit(1)
@@ -501,13 +622,16 @@ for a in data:
             a['aliases'] = [x for x in a.get('aliases', []) if str(x).lower() != na]
 
 match.setdefault('aliases', []).append(na)
-with open(cfg, 'w') as f: json.dump(data, f, indent=2)
+tmp = cfg + '.tmp'
+with open(tmp, 'w', encoding='utf-8') as f: json.dump(data, f, indent=2)
+os.replace(tmp, cfg)
 print(f\"\n[OK] Added alias '{na}' to account '{match['label']}' ({match['username']})!\")
 print(f\"     All aliases: {', '.join(match['aliases'])}\n\")
 " "$target" "$new_alias"
 }
 
 unalias_account() {
+    require_python || return 1
     local target="$1"
     local alias_to_rm="$2"
 
@@ -528,11 +652,11 @@ unalias_account() {
         return
     fi
 
-    python3 -c "
-import json, sys
-cfg = '$CONFIG_FILE'
+    "$PYTHON_BIN" -c "
+import json, os, sys
+cfg = os.environ['GIT_ACCOUNT_SWITCHER_CONFIG']
 try:
-    with open(cfg) as f: data = json.load(f)
+    with open(cfg, encoding='utf-8-sig') as f: data = json.load(f)
 except Exception:
     print('[ERROR] Config file not found.')
     sys.exit(1)
@@ -557,7 +681,9 @@ if rm_a not in cur_aliases:
     sys.exit(0)
 
 match['aliases'] = [x for x in match.get('aliases', []) if str(x).lower() != rm_a]
-with open(cfg, 'w') as f: json.dump(data, f, indent=2)
+tmp = cfg + '.tmp'
+with open(tmp, 'w', encoding='utf-8') as f: json.dump(data, f, indent=2)
+os.replace(tmp, cfg)
 print(f\"\n[OK] Removed alias '{rm_a}' from account '{match['label']}'.\")
 print(f\"     Remaining aliases: {', '.join(match['aliases'])}\n\")
 " "$target" "$alias_to_rm"
@@ -586,6 +712,7 @@ edit_config() {
 }
 
 bind_folder() {
+    require_python || return 1
     local folder="$1"
     local target="$2"
 
@@ -616,11 +743,11 @@ bind_folder() {
         return
     fi
 
-    python3 -c "
-import json, sys, os, subprocess
-cfg = '$CONFIG_FILE'
+    "$PYTHON_BIN" -c "
+import json, sys, os, re, shlex, subprocess
+cfg = os.environ['GIT_ACCOUNT_SWITCHER_CONFIG']
 try:
-    with open(cfg) as f: data = json.load(f)
+    with open(cfg, encoding='utf-8-sig') as f: data = json.load(f)
 except Exception:
     print('[ERROR] Config file not found.')
     sys.exit(1)
@@ -637,42 +764,85 @@ if not match:
     print(f'[ERROR] Account \"{q}\" not found.')
     sys.exit(1)
 
-home = os.path.expanduser('~')
-prof_cfg = os.path.join(home, f".gitconfig-{match['key']}")
-u = match['username']
-skey = match.get('signingkey', '')
-sign_sec = ""
-if skey:
-    sign_sec = f"\n    signingkey = {skey}\n[commit]\n    gpgsign = true"
-    if skey.startswith('ssh-') or skey.startswith('key::'):
-        sign_sec += "\n[gpg]\n    format = ssh"
+key = match.get('key', '')
+if not re.match(r'^[a-z0-9._-]+$', key):
+    print('[ERROR] Account key contains unsafe characters; refusing to create a profile file.')
+    sys.exit(1)
 
-with open(prof_cfg, 'w') as f:
-    f.write(f"""[user]
-    name = {match['name']}
-    email = {match['email']}{sign_sec}
-[credential "https://github.com"]
-    username = {u}
-    helper = 
-    helper = "!git-account-switcher cred {u}"
-[credential "https://gist.github.com"]
-    username = {u}
-    helper = 
-    helper = "!git-account-switcher cred {u}"
-""")
+home = os.environ.get('GIT_ACCOUNT_SWITCHER_HOME', os.path.expanduser('~'))
+prof_cfg = os.path.join(home, f'.gitconfig-{key}')
+u = match['username']
+if not re.match(r'^[A-Za-z0-9][A-Za-z0-9._-]*$', u):
+    print('[ERROR] Account username contains unsafe characters; refusing to generate a credential helper.')
+    sys.exit(1)
+helper_cmd = '!' + shlex.quote(sys.argv[4]) + ' cred ' + shlex.quote(u) + ' get github.com'
+skey = match.get('signingkey', '')
+
+if os.path.exists(prof_cfg):
+    try:
+        with open(prof_cfg, encoding='utf-8-sig') as f: old = f.read()
+    except Exception:
+        old = ''
+    if not re.search('git-account-switcher.*cred', old):
+        os.replace(prof_cfg, prof_cfg + '.bak')
+    else:
+        os.remove(prof_cfg)
+
+def cfg_set(*args):
+    subprocess.run(['git', 'config', '-f', prof_cfg, *args], check=False, capture_output=True, text=True)
+
+cfg_set('user.name', match['name'])
+cfg_set('user.email', match['email'])
+if skey:
+    cfg_set('user.signingkey', skey)
+    cfg_set('commit.gpgsign', 'true')
+    if skey.startswith('ssh-') or skey.startswith('key::'):
+        cfg_set('gpg.format', 'ssh')
+for host in ('https://github.com', 'https://gist.github.com'):
+    cfg_set('--add', f'credential.{host}.username', u)
+    cfg_set('--add', f'credential.{host}.helper', '')
+    cfg_set('--add', f'credential.{host}.helper', helper_cmd)
 
 pat = sys.argv[2]
-is_win = (os.name == 'nt' or sys.platform == 'win32' or sys.platform == 'cygwin' or 'CYGWIN' in os.uname().sysname if hasattr(os, 'uname') else False)
-inc_key = f"includeIf.gitdir/i:{pat}.path" if is_win else f"includeIf.gitdir:{pat}.path"
-norm_cfg = prof_cfg.replace('\\', '/')
+inc_key = f'includeIf.gitdir:{pat}.path'
+norm_cfg = prof_cfg.replace('\\\\', '/')
+
+def norm(p):
+    return p.replace('\\\\', '/').lower()
+
+removed_binding_files = []
+def unset_matching_bindings():
+    keys = subprocess.run(['git','config','--global','--name-only','--get-regexp','^includeif\\\\.gitdir'], capture_output=True, text=True).stdout
+    for k in keys.splitlines():
+        k = k.strip()
+        if not k:
+            continue
+        p = re.sub('^includeif\\\\.gitdir(?:/i)?:', '', k, flags=re.I)
+        p = re.sub('\\\\.path$', '', p, flags=re.I)
+        if norm(p) == norm(pat):
+            val = subprocess.run(['git','config','--global','--get',k], capture_output=True, text=True).stdout.strip()
+            if val:
+                removed_binding_files.append(val)
+            subprocess.run(['git','config','--global','--unset-all',k], check=False, capture_output=True)
+
+unset_matching_bindings()
 subprocess.call(['git', 'config', '--global', inc_key, norm_cfg])
+remaining = subprocess.run(['git','config','--global','--get-regexp','^includeif\\\\.gitdir'], capture_output=True, text=True).stdout
+for old_file in removed_binding_files:
+    if norm(old_file) not in norm(remaining) and os.path.exists(old_file):
+        try:
+            with open(old_file, encoding='utf-8-sig') as f: old_text = f.read()
+            if re.search('git-account-switcher.*cred', old_text):
+                os.remove(old_file)
+        except OSError:
+            pass
 
 print(f\"\n[OK] Folder '{sys.argv[3]}' successfully bound to account '{match['label']}'!\")
 print(f\"     All Git repositories inside will automatically commit & push as:\")
 print(f\"     Name    : {match['name']}\")
 print(f\"     Email   : {match['email']}\")
 print(f\"     Username: {u} (auto-authenticated via gh token)\n\")
-" "$target" "$pattern" "$resolved"
+" "$target" "$pattern" "$resolved" "$SELF_SCRIPT"
 
     # Scan for existing repos with local overrides
     if [[ -d "$resolved" ]]; then
@@ -738,15 +908,28 @@ unbind_folder() {
     local pattern="${resolved%/}/"
 
     local found="false"
+    local -a removed_cfgs=()
     while IFS= read -r k; do
         local k_clean
         k_clean=$(echo "$k" | sed -E 's/^includeif\.gitdir(\/i)?://; s/\.path$//')
         local k_norm="${k_clean%/}/"
-        if [[ "${k_norm,,}" == "${pattern,,}" || "${k,,}" == *"${pattern,,}"* ]]; then
-            git config --global --unset "$k" || true
+        if [[ "${k_norm,,}" == "${pattern,,}" ]]; then
+            local cfg_path
+            cfg_path=$(git config --global --get "$k" 2>/dev/null || true)
+            [[ -n "$cfg_path" ]] && removed_cfgs+=("$cfg_path")
+            git config --global --unset-all "$k" || true
             found="true"
         fi
     done < <(git config --global --name-only --get-regexp '^includeif\.gitdir' 2>/dev/null || true)
+
+    local remaining
+    remaining=$(git config --global --get-regexp '^includeif\.gitdir' 2>/dev/null || true)
+    for cfg_path in "${removed_cfgs[@]}"; do
+        if [[ -f "$cfg_path" ]] && grep -qE 'git-account-switcher.*cred' "$cfg_path" 2>/dev/null && [[ "$remaining" != *"$cfg_path"* ]]; then
+            rm -f "$cfg_path"
+            echo -e "  \033[0;32m[CLEAN] Removed generated profile config: $cfg_path\033[0m"
+        fi
+    done
 
     if [[ "$found" == "true" ]]; then
         echo -e "\n\033[0;32m[OK] Unbound folder '$resolved'.\033[0m\n"
@@ -797,10 +980,15 @@ doctor() {
     echo ""
     echo -e "\033[1;33m[1/5] Checking Git toolchain...\033[0m"
     if command -v git >/dev/null 2>&1; then
-        local git_ver
+        local git_ver git_num
         git_ver=$(git --version 2>/dev/null | sed 's/git version //')
+        git_num="${git_ver%% *}"
         echo -e "  \033[0;32m[PASS] Git executable found : $(command -v git)\033[0m"
         echo -e "         Version              : $git_ver"
+        if ! awk -v v="$git_num" 'BEGIN { split(v,a,"."); exit !(a[1] > 2 || (a[1] == 2 && a[2] >= 13)) }'; then
+            echo -e "  \033[1;33m[WARN] Git >= 2.13 is recommended; found $git_ver.\033[0m"
+            ((warn_count++)) || true
+        fi
     else
         echo -e "  \033[0;31m[FAIL] Git executable not found in PATH.\033[0m"
         ((issue_count++)) || true
@@ -824,12 +1012,17 @@ doctor() {
         echo -e "  \033[1;33m[WARN] Configuration file not found: $CONFIG_FILE\033[0m"
         ((warn_count++)) || true
     else
-        python3 -c "
-import json, subprocess, sys
+        if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+            echo -e "  \033[1;33m[WARN] Python 3 not found; cannot verify profile tokens.\033[0m"
+            ((warn_count++)) || true
+        else
+        "$PYTHON_BIN" -c "
+import json, os, subprocess, sys
+cfg = os.environ['GIT_ACCOUNT_SWITCHER_CONFIG']
 try:
-    with open('$CONFIG_FILE') as f:
+    with open(cfg, encoding='utf-8-sig') as f:
         accs = json.load(f)
-    print(f'  Found {len(accs)} account profile(s) in $CONFIG_FILE:')
+    print(f'  Found {len(accs)} account profile(s) in {cfg}:')
     warns = 0
     for a in accs:
         u = a.get('username', '')
@@ -848,7 +1041,7 @@ try:
             warns += 1
     sys.exit(warns)
 except Exception as e:
-    print(f'  \033[0;31m[FAIL] Error reading $CONFIG_FILE: {e}\033[0m')
+    print(f'  \033[0;31m[FAIL] Error reading {cfg}: {e}\033[0m')
     sys.exit(99)
 " 2>/dev/null
         local py_status=$?
@@ -856,6 +1049,7 @@ except Exception as e:
             ((issue_count++)) || true
         elif [[ $py_status -gt 0 ]]; then
             ((warn_count += py_status)) || true
+        fi
         fi
     fi
 
@@ -880,7 +1074,7 @@ except Exception as e:
                     echo -e "  \033[0;32m[PASS] Binding: $b_dir -> $inc_file\033[0m"
                     local helper_cfg
                     helper_cfg=$(git config -f "$inc_file" --get credential.https://github.com.helper 2>/dev/null || true)
-                    if [[ "$helper_cfg" == *"git-account-switcher cred"* ]]; then
+                    if [[ "$helper_cfg" =~ git-account-switcher.*cred ]]; then
                         echo -e "         Credential Helper: Configured ($helper_cfg)"
                     else
                         echo -e "  \033[1;33m[WARN] Credential helper missing in $inc_file\033[0m"
@@ -961,6 +1155,28 @@ except Exception as e:
                 echo -e "  [INFO] Local repository override active ($loc_name <$loc_email>)"
             fi
         fi
+
+        local local_helpers last_helper helper_script has_reset="false"
+        local_helpers=$(git config --local --get-all credential.https://github.com.helper 2>/dev/null || true)
+        if [[ -n "$local_helpers" ]]; then
+            while IFS= read -r hl; do
+                [[ -z "$hl" ]] && has_reset="true"
+            done <<< "$local_helpers"
+            if [[ "$has_reset" == "false" ]] && [[ -n "$(git config --global --get-all credential.https://github.com.helper 2>/dev/null || true)" ]]; then
+                echo -e "  \033[1;33m[WARN] Local credential helper has no empty reset; a global Git helper may win.\033[0m"
+                echo -e "         Re-run 'gswitch -l <account>' to repair credential isolation."
+                ((warn_count++)) || true
+            fi
+            last_helper=$(printf '%s\n' "$local_helpers" | tail -n 1)
+            if [[ "$last_helper" =~ git-account-switcher.*cred ]]; then
+                helper_script=$(printf '%s' "$last_helper" | sed -E "s/^!'([^']+)' cred .*/\1/")
+                if [[ "$helper_script" == "$last_helper" || ! -f "$helper_script" ]]; then
+                    echo -e "  \033[1;33m[WARN] Local credential helper script is missing or uses a bare command: $last_helper\033[0m"
+                    echo -e "         Re-run 'gswitch -l <account>' after installing the helper."
+                    ((warn_count++)) || true
+                fi
+            fi
+        fi
     else
         echo -e "  [INFO] Current directory is not a Git repository."
     fi
@@ -976,6 +1192,42 @@ except Exception as e:
     fi
     echo "============================================================"
     echo ""
+    [[ $issue_count -eq 0 ]] && return 0 || return 1
+}
+
+release_latest_tag() {
+    gh release view --repo "$RELEASES_REPO" --json tagName --jq '.tagName' 2>/dev/null || true
+}
+
+release_verify_dir() {
+    local dir="$1"
+    if ! command -v gh >/dev/null 2>&1; then
+        echo -e "\033[0;31m[ERROR] GitHub CLI (gh) is required to verify releases.\033[0m" >&2
+        return 1
+    fi
+    if [[ ! -f "$dir/SHA256SUMS" ]]; then
+        echo -e "\033[0;31m[ERROR] Release is missing SHA256SUMS.\033[0m" >&2
+        return 1
+    fi
+    if ! gh attestation verify "$dir/SHA256SUMS" --repo "$RELEASES_REPO" --signer-workflow "$RELEASE_WORKFLOW" --deny-self-hosted-runners >/dev/null 2>&1; then
+        echo -e "\033[0;31m[ERROR] Release attestation verification failed.\033[0m" >&2
+        return 1
+    fi
+    if command -v sha256sum >/dev/null 2>&1; then
+        (cd "$dir" && sha256sum -c SHA256SUMS >/dev/null 2>&1) || {
+            echo -e "\033[0;31m[ERROR] Release checksum verification failed.\033[0m" >&2
+            return 1
+        }
+    elif command -v shasum >/dev/null 2>&1; then
+        (cd "$dir" && shasum -a 256 -c SHA256SUMS >/dev/null 2>&1) || {
+            echo -e "\033[0;31m[ERROR] Release checksum verification failed.\033[0m" >&2
+            return 1
+        }
+    else
+        echo -e "\033[0;31m[ERROR] sha256sum or shasum is required to verify releases.\033[0m" >&2
+        return 1
+    fi
+    return 0
 }
 
 update_gswitch() {
@@ -986,7 +1238,7 @@ update_gswitch() {
     echo "============================================================"
     echo ""
 
-    local bin_dir="$HOME/.local/bin"
+    local bin_dir="$GSWITCH_HOME/.local/bin"
     mkdir -p "$bin_dir"
 
     local is_local=false
@@ -998,25 +1250,64 @@ update_gswitch() {
         fi
     fi
 
-    echo "Fetching and updating binary files..."
     local files=("git-account-switcher" "gswitch" "switch-git")
-    for f in "${files[@]}"; do
-        local dest="$bin_dir/$f"
-        if [[ "$is_local" == "true" && -f "$script_dir/$f" ]]; then
-            cp "$script_dir/$f" "$dest"
-            chmod +x "$dest"
-            echo -e "  \033[0;32m[OK] Updated $f (local source)\033[0m"
-        else
-            if curl -fsSL "$RAW_BASE/bin/$f" -o "$dest" 2>/dev/null; then
-                chmod +x "$dest"
-                echo -e "  \033[0;32m[OK] Updated $f (remote source)\033[0m"
-            else
-                echo -e "  \033[1;33m[WARN] Failed to update $f from remote\033[0m"
+    if [[ "$is_local" == "true" ]]; then
+        for f in "${files[@]}"; do
+            if [[ -f "$script_dir/$f" ]]; then
+                cp "$script_dir/$f" "$bin_dir/.$f.new.$$"
+                chmod +x "$bin_dir/.$f.new.$$"
+                mv -f "$bin_dir/.$f.new.$$" "$bin_dir/$f"
+                echo -e "  \033[0;32m[OK] Updated $f (local source)\033[0m"
             fi
+        done
+    else
+        local tag="${GSWITCH_UPDATE_TAG:-$(release_latest_tag)}"
+        if [[ -z "$tag" ]]; then
+            echo -e "\033[0;31m[ERROR] No GitHub release found for $RELEASES_REPO.\033[0m" >&2
+            echo "        Create a v* release with attested assets, or set GSWITCH_UPDATE_TAG." >&2
+            return 1
         fi
-    done
+        echo "Downloading verified release $tag..."
+        local tmp
+        tmp=$(mktemp -d "${TMPDIR:-/tmp}/gswitch-update.XXXXXX") || return 1
+        if ! gh release download "$tag" --repo "$RELEASES_REPO" --dir "$tmp" --clobber >/dev/null 2>&1; then
+            echo -e "\033[0;31m[ERROR] Failed to download release $tag.\033[0m" >&2
+            rm -rf "$tmp"
+            return 1
+        fi
+        if ! release_verify_dir "$tmp"; then
+            rm -rf "$tmp"
+            return 1
+        fi
 
-    # Ensure Git aliases
+        local failed=0
+        for f in "${files[@]}"; do
+            if [[ -f "$bin_dir/$f" ]]; then
+                cp "$bin_dir/$f" "$tmp/backup-$f" 2>/dev/null || true
+            fi
+            if ! cp "$tmp/$f" "$bin_dir/.$f.new.$$" 2>/dev/null; then
+                failed=1
+                break
+            fi
+            chmod +x "$bin_dir/.$f.new.$$" 2>/dev/null || true
+            if ! mv -f "$bin_dir/.$f.new.$$" "$bin_dir/$f" 2>/dev/null; then
+                failed=1
+                break
+            fi
+            echo -e "  \033[0;32m[OK] Verified & updated $f\033[0m"
+        done
+        if [[ "$failed" -ne 0 ]]; then
+            echo -e "\033[0;31m[ERROR] Update failed; restoring previous files.\033[0m" >&2
+            for f in "${files[@]}"; do
+                [[ -f "$tmp/backup-$f" ]] && cp "$tmp/backup-$f" "$bin_dir/$f" 2>/dev/null || true
+            done
+            rm -rf "$tmp"
+            return 1
+        fi
+        rm -rf "$tmp"
+        echo -e "  \033[0;32m[OK] Attestation, checksums, and atomic replacement verified for $tag\033[0m"
+    fi
+
     git config --global alias.who "!git-account-switcher status" 2>/dev/null || true
     git config --global alias.switch-acc "!git-account-switcher" 2>/dev/null || true
 
@@ -1038,14 +1329,14 @@ _gswitch_completions() {
     fi
 
     local subcommands="status who list ls doctor check bind unbind bindings sync setup add remove rm alias unalias edit config update upgrade version completion help -l --local -g --global -f --force -v -h"
-    local cfg="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
+    local cfg="${GIT_ACCOUNT_SWITCHER_CONFIG:-${GIT_ACCOUNT_SWITCHER_HOME:-$HOME}/.config/git-account-switcher/accounts.json}"
     local acc_keys=""
 
     if [[ -f "$cfg" ]] && command -v python3 >/dev/null 2>&1; then
-        acc_keys=$(python3 -c "
-import json
+        acc_keys=$(GSWITCH_COMPLETION_CFG="$cfg" python3 -c "
+import json, os
 try:
-    with open('$cfg') as f:
+    with open(os.environ['GSWITCH_COMPLETION_CFG'], encoding='utf-8-sig') as f:
         data = json.load(f)
     keys = []
     for a in data:
@@ -1100,14 +1391,14 @@ _gswitch_completions() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     local subcommands="status who list ls doctor check bind unbind bindings sync setup add remove rm alias unalias edit config update upgrade version completion help -l --local -g --global -f --force -v -h"
-    local cfg="${GIT_ACCOUNT_SWITCHER_CONFIG:-$HOME/.config/git-account-switcher/accounts.json}"
+    local cfg="${GIT_ACCOUNT_SWITCHER_CONFIG:-${GIT_ACCOUNT_SWITCHER_HOME:-$HOME}/.config/git-account-switcher/accounts.json}"
     local acc_keys=""
 
     if [[ -f "$cfg" ]] && command -v python3 >/dev/null 2>&1; then
-        acc_keys=$(python3 -c "
-import json
+        acc_keys=$(GSWITCH_COMPLETION_CFG="$cfg" python3 -c "
+import json, os
 try:
-    with open('$cfg') as f:
+    with open(os.environ['GSWITCH_COMPLETION_CFG'], encoding='utf-8-sig') as f:
         data = json.load(f)
     keys = []
     for a in data:
@@ -1167,25 +1458,25 @@ handle_completion() {
         get_bash_completion_script > "$comp_file"
         echo "  [OK] Generated completion script -> $comp_file"
 
-        local bashrc="$HOME/.bashrc"
+        local bashrc="$GSWITCH_HOME/.bashrc"
         local include_line="[[ -f \"$comp_file\" ]] && source \"$comp_file\""
         if [[ -f "$bashrc" ]]; then
             if ! grep -q "$comp_file" "$bashrc" 2>/dev/null; then
                 echo -e "\n# git-account-switcher shell completion\n$include_line" >> "$bashrc"
-                echo "  [OK] Added completion loader to ~/.bashrc"
+                echo "  [OK] Added completion loader to $bashrc"
             else
-                echo "  [OK] ~/.bashrc is already configured."
+                echo "  [OK] $bashrc is already configured."
             fi
         fi
 
-        local zshrc="$HOME/.zshrc"
+        local zshrc="$GSWITCH_HOME/.zshrc"
         if [[ -f "$zshrc" ]]; then
             local zcomp_file="$CONFIG_DIR/completion.zsh"
             get_zsh_completion_script > "$zcomp_file"
             local zinclude="[[ -f \"$zcomp_file\" ]] && source \"$zcomp_file\""
             if ! grep -q "$zcomp_file" "$zshrc" 2>/dev/null; then
                 echo -e "\n# git-account-switcher shell completion\n$zinclude" >> "$zshrc"
-                echo "  [OK] Added completion loader to ~/.zshrc"
+                echo "  [OK] Added completion loader to $zshrc"
             fi
         fi
 
@@ -1208,6 +1499,7 @@ show_help() {
     echo -e "\033[1;33mUSAGE:\033[0m"
     echo "  gswitch [account]                   Switch account globally (by key, username, alias, or index)"
     echo "  gswitch -l [account]                Switch account locally (current repository only)"
+    echo "  gswitch --clear-local [account]     Switch globally and clear shadowing repo-local overrides"
     echo "  gswitch                             Open interactive account selection menu"
     echo "  gswitch status | who                View active GitHub token & Git identities"
     echo "  gswitch list | ls                   List all configured account profiles with aliases"
@@ -1247,6 +1539,7 @@ show_help() {
     echo -e "\033[1;33mFLAGS:\033[0m"
     echo "  -l, --local                         Scope changes to current repository only (.git/config)"
     echo "  -g, --global                        Scope changes system-wide (default)"
+    echo "  -c, --clear-local                   When switching globally, remove shadowing repo-local overrides"
     echo "  -f, --force                         Force action without interactive confirmation"
     echo "  -h, --help                          Show detailed help information"
     echo ""
@@ -1254,7 +1547,8 @@ show_help() {
     echo "  gswitch personal                    # Switch to 'personal' profile globally"
     echo "  gswitch work                        # Switch to 'work' profile globally"
     echo "  gswitch 1                           # Switch to profile #1"
-    echo "  gswitch -l work                     # Apply 'work' author to THIS repository only"
+    echo "  gswitch -l work                     # Apply 'work' author & push token to THIS repository only"
+    echo "  gswitch --clear-local personal      # Switch globally and remove stale repo-local overrides"
     echo "  gswitch alias work w                # Add shortcut alias 'w' to work account"
     echo "  gswitch unalias work w              # Remove shortcut alias 'w' from work"
     echo "  gswitch bind ~/work work            # All repos in ~/work commit as work"
@@ -1306,30 +1600,37 @@ switch_account() {
     local is_local="$5"
     local signingkey="$6"
 
+    local is_repo
+    is_repo=$(git rev-parse --is-inside-work-tree 2>/dev/null || echo "false")
+
+    if [[ "$is_local" == "true" && "$is_repo" != "true" ]]; then
+        echo -e "\033[0;31m[ERROR] Cannot apply --local: current directory is not a Git repository.\033[0m"
+        return 1
+    fi
+
     echo ""
     echo -e "\033[1;33m>> Switching to account: [$label] ($username)...\033[0m"
 
     if ! gh auth switch -u "$username"; then
         echo -e "\033[0;31m[ERROR] Failed to switch GitHub CLI to $username\033[0m"
-        exit 1
+        return 1
     fi
 
-    local is_repo
-    is_repo=$(git rev-parse --is-inside-work-tree 2>/dev/null || echo "false")
-
     if [[ "$is_local" == "true" ]]; then
-        if [[ "$is_repo" != "true" ]]; then
-            echo -e "\033[0;31m[ERROR] Current directory is not a Git repository.\033[0m"
-            exit 1
-        fi
+        local github_helper gist_helper
+        github_helper=$(cred_helper_command "$username")
+        gist_helper="$github_helper"
+
         git config --local user.name "$name"
         git config --local user.email "$email"
         git config --local credential.https://github.com.username "$username"
         git config --local --unset-all credential.https://github.com.helper 2>/dev/null || true
-        git config --local --add credential.https://github.com.helper "!git-account-switcher cred $username"
+        git config --local --add credential.https://github.com.helper ""
+        git config --local --add credential.https://github.com.helper "$github_helper"
         git config --local credential.https://gist.github.com.username "$username"
         git config --local --unset-all credential.https://gist.github.com.helper 2>/dev/null || true
-        git config --local --add credential.https://gist.github.com.helper "!git-account-switcher cred $username"
+        git config --local --add credential.https://gist.github.com.helper ""
+        git config --local --add credential.https://gist.github.com.helper "$gist_helper"
 
         if [[ -n "$signingkey" ]]; then
             git config --local user.signingkey "$signingkey"
@@ -1345,7 +1646,7 @@ switch_account() {
         echo -e "\033[0;32m[OK] GitHub CLI switched to : $username\033[0m"
         echo -e "\033[0;32m[OK] Git user.name (LOCAL)  : $name\033[0m"
         echo -e "\033[0;32m[OK] Git user.email (LOCAL) : $email\033[0m"
-        echo -e "\033[0;32m[OK] Git cred helper (LOCAL): !git-account-switcher cred $username\033[0m"
+        echo -e "\033[0;32m[OK] Git cred helper (LOCAL): $github_helper\033[0m"
         echo ""
         echo -e "\033[0;36m=> Applied locally with isolated push permissions for this repository only!\033[0m"
     else
@@ -1355,16 +1656,22 @@ switch_account() {
             has_local_cred=$(git config --local credential.https://github.com.username 2>/dev/null || true)
             has_local_sign=$(git config --local user.signingkey 2>/dev/null || true)
             if [[ -n "$has_local_name" || -n "$has_local_cred" || -n "$has_local_sign" ]]; then
-                git config --local --unset-all user.name 2>/dev/null || true
-                git config --local --unset-all user.email 2>/dev/null || true
-                git config --local --unset-all credential.https://github.com.username 2>/dev/null || true
-                git config --local --unset-all credential.https://github.com.helper 2>/dev/null || true
-                git config --local --unset-all credential.https://gist.github.com.username 2>/dev/null || true
-                git config --local --unset-all credential.https://gist.github.com.helper 2>/dev/null || true
-                git config --local --unset-all user.signingkey 2>/dev/null || true
-                git config --local --unset-all commit.gpgsign 2>/dev/null || true
-                git config --local --unset-all gpg.format 2>/dev/null || true
-                echo -e "\033[1;33m[INFO] Cleared repository-local overrides in current repository.\033[0m"
+                if [[ "${CLEAR_LOCAL:-false}" == "true" ]]; then
+                    git config --local --unset-all user.name 2>/dev/null || true
+                    git config --local --unset-all user.email 2>/dev/null || true
+                    git config --local --unset-all credential.https://github.com.username 2>/dev/null || true
+                    git config --local --unset-all credential.https://github.com.helper 2>/dev/null || true
+                    git config --local --unset-all credential.https://gist.github.com.username 2>/dev/null || true
+                    git config --local --unset-all credential.https://gist.github.com.helper 2>/dev/null || true
+                    git config --local --unset-all user.signingkey 2>/dev/null || true
+                    git config --local --unset-all commit.gpgsign 2>/dev/null || true
+                    git config --local --unset-all gpg.format 2>/dev/null || true
+                    echo -e "\033[1;33m[INFO] Cleared repository-local overrides in current repository.\033[0m"
+                else
+                    echo -e "\033[1;33m[INFO] Repository-local overrides are active and were left untouched.\033[0m"
+                    echo -e "       They continue to shadow global settings in this repository."
+                    echo -e "       Use 'gswitch -l <account>' to update them, or 'gswitch --clear-local <account>' to remove them."
+                fi
             fi
         fi
 
@@ -1392,6 +1699,7 @@ switch_account() {
 
 # Process flags
 APPLY_LOCAL="false"
+CLEAR_LOCAL="false"
 TARGET=""
 
 while [[ $# -gt 0 ]]; do
@@ -1404,13 +1712,17 @@ while [[ $# -gt 0 ]]; do
             APPLY_LOCAL="false"
             shift
             ;;
+        -c|--clear-local)
+            CLEAR_LOCAL="true"
+            shift
+            ;;
         status|who|current|-s)
             show_status
             exit 0
             ;;
         doctor|check|diag|diagnose)
             doctor
-            exit 0
+            exit $?
             ;;
         list|ls)
             show_list
@@ -1532,10 +1844,11 @@ if [[ -z "$TARGET" ]]; then
 fi
 
 # Find account in JSON with exact and fuzzy matching
-SELECTED=$(python3 -c "
-import json, sys
+require_python || exit 1
+SELECTED=$("$PYTHON_BIN" -c "
+import json, os, sys
 q = sys.argv[1].lower()
-with open('$CONFIG_FILE') as f:
+with open(os.environ['GIT_ACCOUNT_SWITCHER_CONFIG'], encoding='utf-8-sig') as f:
     data = json.load(f)
 
 # 1. Exact match
@@ -1545,18 +1858,19 @@ for a in data:
         print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\t{a.get('signingkey') or ''}\")
         sys.exit(0)
 
-# 2. Fuzzy match
-for a in data:
-    u = a.get('username','').lower()
-    k = a.get('key','').lower()
-    if q in u or u in q or q in k or k in q:
-        print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\t{a.get('signingkey') or ''}\")
-        sys.exit(0)
+# 2. Fuzzy match (minimum 3 characters, part of username or key)
+if len(q) >= 3:
+    for a in data:
+        u = a.get('username','').lower()
+        k = a.get('key','').lower()
+        if q in u or q in k:
+            print(f\"{a.get('label')}\t{a.get('username')}\t{a.get('name')}\t{a.get('email')}\t{a.get('signingkey') or ''}\")
+            sys.exit(0)
 " "$TARGET" 2>/dev/null || true)
 
 if [[ -n "$SELECTED" ]]; then
     IFS=$'\t' read -r S_LABEL S_USER S_NAME S_EMAIL S_SIGNKEY <<< "$SELECTED"
-    switch_account "$S_LABEL" "$S_USER" "$S_NAME" "$S_EMAIL" "$APPLY_LOCAL" "$S_SIGNKEY"
+    switch_account "$S_LABEL" "$S_USER" "$S_NAME" "$S_EMAIL" "$APPLY_LOCAL" "$S_SIGNKEY" || exit 1
 else
     echo -e "\033[0;31m[ERROR] Account '$TARGET' not found. Run 'gswitch list', 'gswitch add', or 'gswitch sync'.\033[0m"
     exit 1

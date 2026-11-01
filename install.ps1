@@ -40,14 +40,17 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 Write-Host "  [OK] GitHub CLI (gh) is available." -ForegroundColor Green
 
 # 2. Setup target bin directory
-$binDir = "$HOME\.local\bin"
+$homeDir = if ($env:GIT_ACCOUNT_SWITCHER_HOME) { $env:GIT_ACCOUNT_SWITCHER_HOME } else { $HOME }
+$binDir = "$homeDir\.local\bin"
 Write-Host "[2/5] Preparing installation directory ($binDir)..." -ForegroundColor Yellow
 if (-not (Test-Path $binDir)) {
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 }
 
-$RAW_BASE = "https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master"
+$ReleasesRepo = "ThanhNguyxnOrg/git-account-switcher"
+$ReleaseWorkflow = "ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml"
 $isLocal = ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "bin")))
+$releaseTmp = $null
 
 $filesToCopy = @(
     "git-account-switcher.ps1", "git-account-switcher.cmd", "git-account-switcher",
@@ -55,27 +58,67 @@ $filesToCopy = @(
     "switch-git.ps1", "switch-git.cmd", "switch-git"
 )
 
-foreach ($file in $filesToCopy) {
-    $destFile = Join-Path $binDir $file
-    if ($isLocal) {
+if ($isLocal) {
+    foreach ($file in $filesToCopy) {
         $srcPath = Join-Path (Join-Path $PSScriptRoot "bin") $file
         if (Test-Path $srcPath) {
-            Copy-Item -Path $srcPath -Destination $binDir -Force
+            $destFile = Join-Path $binDir $file
+            Copy-Item -Path $srcPath -Destination "$destFile.new" -Force
+            Move-Item -Path "$destFile.new" -Destination $destFile -Force
             Write-Host "  [OK] Installed $file -> $binDir" -ForegroundColor Green
         }
-    } else {
-        Write-Host "  Downloading $file..." -ForegroundColor DarkCyan
-        $fileUrl = "$RAW_BASE/bin/$file"
-        Invoke-RestMethod -Uri $fileUrl -OutFile $destFile
-        Write-Host "  [OK] Downloaded and installed $file -> $binDir" -ForegroundColor Green
     }
+} else {
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+        Write-Host "[ERROR] GitHub CLI (gh) is required to verify release assets." -ForegroundColor Red
+        exit 1
+    }
+    $tag = if ($env:GSWITCH_INSTALL_TAG) {
+        $env:GSWITCH_INSTALL_TAG
+    } else {
+        (gh release view --repo $ReleasesRepo --json tagName --jq ".tagName" 2>$null | Select-Object -First 1)
+    }
+    if (-not $tag) {
+        Write-Host "[ERROR] No GitHub release found for $ReleasesRepo." -ForegroundColor Red
+        Write-Host "        Create a v* release with attested assets, or set GSWITCH_INSTALL_TAG." -ForegroundColor Gray
+        exit 1
+    }
+    $releaseTmp = Join-Path ([System.IO.Path]::GetTempPath()) ("gswitch-install-" + [System.Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $releaseTmp -Force | Out-Null
+    Write-Host "  Downloading verified release $tag..." -ForegroundColor DarkCyan
+    gh release download $tag --repo $ReleasesRepo --dir $releaseTmp --clobber 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "release download failed" }
+
+    $manifest = Join-Path $releaseTmp "SHA256SUMS"
+    if (-not (Test-Path $manifest)) { throw "release is missing SHA256SUMS" }
+    gh attestation verify $manifest --repo $ReleasesRepo --signer-workflow $ReleaseWorkflow --deny-self-hosted-runners 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "attestation verification failed" }
+
+    $manifestLines = Get-Content -Path $manifest
+    foreach ($file in $filesToCopy) {
+        $source = Join-Path $releaseTmp $file
+        if (-not (Test-Path $source)) { throw "release is missing $file" }
+        $expectedLine = $manifestLines | Where-Object { $_ -match ("^[0-9a-fA-F]{64}\s+\*?" + [regex]::Escape($file) + "$") } | Select-Object -First 1
+        if (-not $expectedLine) { throw "SHA256SUMS has no entry for $file" }
+        $expected = ($expectedLine -split '\s+')[0].ToLower()
+        $actual = (Get-FileHash -Path $source -Algorithm SHA256).Hash.ToLower()
+        if ($actual -ne $expected) { throw "checksum mismatch for $file" }
+        $destFile = Join-Path $binDir $file
+        Copy-Item -Path $source -Destination "$destFile.new" -Force
+        Move-Item -Path "$destFile.new" -Destination $destFile -Force
+        Write-Host "  [OK] Verified & installed $file" -ForegroundColor Green
+    }
+    Write-Host "  [OK] Attestation and checksums verified for $tag" -ForegroundColor Green
 }
 
 # Ensure .local\bin is in User PATH
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-if ($userPath -notlike "*$HOME\.local\bin*") {
+$pathEntries = @($userPath -split ';' | Where-Object { $_ })
+$binNorm = $binDir.TrimEnd('\', '/')
+$alreadyInPath = @($pathEntries | Where-Object { $_.TrimEnd('\', '/') -ieq $binNorm }).Count -gt 0
+if (-not $alreadyInPath) {
     Write-Host "  Adding $binDir to User PATH..." -ForegroundColor DarkCyan
-    $newUserPath = "$userPath;$binDir"
+    $newUserPath = if ($userPath) { "$userPath;$binDir" } else { $binDir }
     [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
     $env:Path = "$env:Path;$binDir"
     Write-Host "  [OK] PATH updated successfully." -ForegroundColor Green
@@ -85,7 +128,7 @@ if ($userPath -notlike "*$HOME\.local\bin*") {
 
 # 3. Setup configuration directory
 Write-Host "[3/5] Setting up accounts configuration..." -ForegroundColor Yellow
-$configDir = "$HOME\.config\git-account-switcher"
+$configDir = "$homeDir\.config\git-account-switcher"
 if (-not (Test-Path $configDir)) {
     New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 }
@@ -101,16 +144,12 @@ if ((-not (Test-Path $destConfig)) -or $Force) {
     } elseif ($isLocal -and (Test-Path (Join-Path $PSScriptRoot "config\accounts.example.json"))) {
         Copy-Item -Path (Join-Path $PSScriptRoot "config\accounts.example.json") -Destination $destConfig -Force
         Write-Host "  [OK] Deployed template accounts.json -> $destConfig" -ForegroundColor Green
+    } elseif ($releaseTmp -and (Test-Path (Join-Path $releaseTmp "accounts.example.json"))) {
+        Copy-Item -Path (Join-Path $releaseTmp "accounts.example.json") -Destination $destConfig -Force
+        Write-Host "  [OK] Deployed template accounts.json from release -> $destConfig" -ForegroundColor Green
     } else {
-        Write-Host "  Deploying default configuration template..." -ForegroundColor DarkCyan
-        $exampleUrl = "$RAW_BASE/config/accounts.example.json"
-        try {
-            Invoke-RestMethod -Uri $exampleUrl -OutFile $destConfig
-            Write-Host "  [OK] Downloaded template accounts.json -> $destConfig" -ForegroundColor Green
-        } catch {
-            Write-Host "  [INFO] Initialized empty configuration at $destConfig." -ForegroundColor Gray
-            Set-Content -Path $destConfig -Value "[]" -Encoding UTF8
-        }
+        [System.IO.File]::WriteAllText($destConfig, "[]", (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "  [OK] Initialized empty accounts.json -> $destConfig" -ForegroundColor Green
     }
 } else {
     Write-Host "  [INFO] Existing configuration preserved at $destConfig." -ForegroundColor Green
@@ -121,8 +160,9 @@ Write-Host "[4/5] Configuring Git credential helper for GitHub CLI..." -Foregrou
 try {
     git config --global --unset-all credential.https://github.com.helper 2>$null
     $ghExe = (Get-Command gh).Source
-    git config --global --add credential.https://github.com.helper "!`'$ghExe`' auth git-credential"
-    git config --global --add credential.https://gist.github.com.helper "!`'$ghExe`' auth git-credential"
+    $ghExeSafe = $ghExe.Replace("'", "'\''")
+    git config --global --add credential.https://github.com.helper "!'$ghExeSafe' auth git-credential"
+    git config --global --add credential.https://gist.github.com.helper "!'$ghExeSafe' auth git-credential"
     Write-Host "  [OK] Git credential helper linked to GitHub CLI ($ghExe)." -ForegroundColor Green
 } catch {
     Write-Host "  [WARNING] Could not auto-link git credential helper: $_" -ForegroundColor Yellow
@@ -140,6 +180,10 @@ try {
     & (Join-Path $binDir "git-account-switcher.ps1") completion install | Out-Null
     Write-Host "  [OK] Configured shell auto-completion (gswitch <Tab>)." -ForegroundColor Green
 } catch {}
+
+if ($releaseTmp) {
+    Remove-Item -Path $releaseTmp -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
