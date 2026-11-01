@@ -19,7 +19,7 @@
 ## 🎯 The Problem & The Solution
 
 - **The Problem:** `gh auth switch` swaps your GitHub CLI push token, but **leaves Git's commit identity untouched**. Your commit logs still stamp your personal email on work repositories (or vice versa). Meanwhile, setting up multiple SSH keys and host aliases is fragile and cumbersome.
-- **The Solution:** `git-account-switcher` (`gswitch`) atomically updates **both layers** in 1 second:
+- **The Solution:** `git-account-switcher` (`gswitch`) updates **both layers** in one command:
   1. Switches active GitHub CLI token (`gh auth switch -u <username>`).
   2. Updates Git commit author (`git config user.name` & `user.email`) — supporting both **global** and **repository-local** scopes.
   3. Uses GitHub's native privacy-protected `noreply` email to keep personal addresses safe.
@@ -44,6 +44,10 @@
 
 ## ⚡ Quick Start
 
+> **Requirements:** Git >= 2.13, GitHub CLI >= 2.24 (verified install/update requires `gh attestation verify`; tested with gh 2.93), and Python 3 on macOS/Linux (used to read and write `accounts.json`).
+
+> **Verified releases:** installers and `gswitch update` download a GitHub Release, verify `SHA256SUMS`, and run `gh attestation verify` (signer workflow pinned to `release.yml`) before replacing files. Pin a release with `GSWITCH_INSTALL_TAG` / `GSWITCH_UPDATE_TAG`. The one-line commands below require a published `v*` release; for development from a clone, run `./install.sh` or `./install.ps1` from the repository.
+
 Choose your preferred setup method:
 
 ### 🤖 Method 1: AI Agent Auto-Setup (Zero Touch)
@@ -65,12 +69,26 @@ Choose your preferred setup method:
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/install.ps1 | iex
+irm https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/latest/download/install.ps1 | iex
 ```
 
 **macOS & Linux (Bash / Zsh):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/install.sh | bash
+curl -fsSL https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/latest/download/install.sh | bash
+```
+
+#### Verify the Installer Manually (Recommended for High-Security Environments)
+
+Pin a release and verify its GitHub build provenance before executing it:
+
+```bash
+TAG="v1.3.0"
+gh release download "$TAG" --repo ThanhNguyxnOrg/git-account-switcher --pattern install.sh --dir /tmp/gswitch-install
+gh attestation verify /tmp/gswitch-install/install.sh \
+  --repo ThanhNguyxnOrg/git-account-switcher \
+  --signer-workflow ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml \
+  --deny-self-hosted-runners
+bash /tmp/gswitch-install/install.sh
 ```
 
 #### Step 2: Configure Your Accounts
@@ -97,6 +115,8 @@ gswitch               # Open interactive selection menu
 git who               # Check who is currently active
 ```
 
+> **Note:** `gswitch -l` isolates Git commit/push configuration for the current repository, but `gh auth switch` is global by design. Use `gswitch -l` plus the repository credential bridge for Git operations; run `gswitch <account>` when you need `gh pr`, `gh issue`, or other GitHub CLI commands to use that account. By default, a global switch leaves existing repo-local overrides untouched; add `--clear-local` (or `-c`) to remove them.
+
 ---
 
 ## 🎮 Command Cheat Sheet
@@ -105,6 +125,7 @@ git who               # Check who is currently active
 | :--- | :--- | :--- |
 | `gswitch <target>` | `gswitch 1` | Switch account globally by key, username, alias, or index |
 | `gswitch -l <target>` | `gswitch --local` | Switch account for the **current repository only** |
+| `gswitch --clear-local <target>` | `gswitch -c` | Switch globally and remove shadowing repo-local overrides |
 | `gswitch` | | Open interactive numbered selection menu |
 | `gswitch status` | `gswitch current`, `git who` | Inspect active GitHub token, global identity, and local repo override |
 | `gswitch list` | `gswitch ls` | List all profiles with active status and assigned shortcut aliases |
@@ -211,7 +232,7 @@ gswitch unbind C:\Projects\Work
 
 ## 🔄 Updating / Upgrading
 
-Keep `git-account-switcher` up to date with the latest bugfixes and features. All existing user accounts, credentials, and folder bindings are safely preserved.
+Keep `git-account-switcher` up to date with the latest bugfixes and features. `gswitch update` and the update scripts verify the release checksum and GitHub artifact attestation before atomically replacing files; all existing user accounts, credentials, and folder bindings are safely preserved. Set `GSWITCH_UPDATE_TAG=vX.Y.Z` to pin a specific release.
 
 ### Via CLI Command (Fastest):
 ```bash
@@ -222,28 +243,28 @@ gswitch version  # check installed version
 ### Via 1-Line Self-Update Command:
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/update.ps1 | iex
+irm https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/latest/download/update.ps1 | iex
 ```
 
 **macOS & Linux (Bash / Zsh):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/update.sh | bash
+curl -fsSL https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/latest/download/update.sh | bash
 ```
 
 ---
 
 ## 🗑️ Uninstallation
 
-To completely remove `git-account-switcher` and its shell aliases:
+The uninstaller removes the binaries, Git aliases, shell completion loaders, and any folder bindings/profile configs generated by gswitch. Your `accounts.json` is preserved unless you pass `--purge` on Unix (`-PurgeConfig` on Windows).
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/uninstall.ps1 | iex
+irm https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/latest/download/uninstall.ps1 | iex
 ```
 
 **macOS & Linux (Bash / Zsh):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ThanhNguyxnOrg/git-account-switcher/master/uninstall.sh | bash
+curl -fsSL https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/latest/download/uninstall.sh | bash
 ```
 
 ---

@@ -15,7 +15,7 @@ The configuration file is stored in standard user configuration directories:
 | **Linux** | `~/.config/git-account-switcher/accounts.json` |
 
 > [!TIP]
-> You can override this location anytime by setting the `GIT_ACCOUNT_SWITCHER_CONFIG` environment variable.
+> You can override this location anytime by setting the `GIT_ACCOUNT_SWITCHER_CONFIG` environment variable. `GIT_ACCOUNT_SWITCHER_HOME` overrides the home directory used for generated profile files, binaries, and completion scripts (useful for testing or isolated installs).
 
 To open and edit your configuration in your default editor:
 ```bash
@@ -208,7 +208,7 @@ gswitch bind ~/projects/work work
 ```
 
 *What happens under the hood:*  
-`gswitch` automatically creates `~/.gitconfig-<key>` with the account's name, noreply email, and a dynamic credential helper (`credential.https://github.com.helper "!git-account-switcher cred <username>"`). It then registers a case-insensitive `[includeIf "gitdir/i:<folder>/**"]` entry inside your global `~/.gitconfig`. Every repository inside that folder will instantly commit and push under that identity without typing any switch command!
+`gswitch` creates `~/.gitconfig-<key>` with the account's name, email, optional signing key, and a dynamic credential helper. The helper uses the absolute path to the installed `git-account-switcher` executable and includes an empty `helper =` reset before the bridge so it reliably wins over any global helper (including GCM). On Windows the include rule is `[includeIf "gitdir/i:<folder>/"]`; on macOS/Linux it is `[includeIf "gitdir:<folder>/"]`. A trailing slash makes Git match every repository under that folder.
 
 > 💡 **Checking Identity Inside a Bound Folder:**  
 > Run `git who` (or `gswitch status`) inside any repository within the bound directory to verify. `gswitch` will detect the `includeIf` rule and report:

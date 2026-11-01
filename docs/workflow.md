@@ -107,6 +107,8 @@ gswitch add octocat personal "Mona Lisa" "583231+octocat@users.noreply.github.co
 
 ## Phase 4: Daily Switching
 
+> **Prerequisites on macOS/Linux:** Python 3 is required to manage `accounts.json`. On Windows, the PowerShell implementation has no Python dependency.
+
 ### 1. Global Switching (Affects Entire Machine)
 
 Use global switching when you want all new Git commits and GitHub CLI operations across your system to use a specific account:
@@ -127,7 +129,13 @@ cd ~/projects/enterprise-app
 gswitch -l work
 ```
 
-This writes directly to `.git/config` within that repository, leaving your global `~/.gitconfig` untouched.
+This writes directly to `.git/config` within that repository, leaving your global `~/.gitconfig` untouched. `gswitch -l` also switches the active `gh` account globally because GitHub CLI has no repository-local token scope; Git commit/push isolation comes from the repository-local credential bridge.
+
+A normal global switch leaves existing repo-local overrides untouched, since local Git config takes precedence. To remove them explicitly while switching globally, use:
+
+```bash
+gswitch --clear-local personal
+```
 
 ### 3. Interactive Selector
 
@@ -196,11 +204,13 @@ Example output:
 ```
 
 ### Run Self-Diagnostics
-To verify Git versions, token validity, folder bindings, and active repository remote URLs (such as catching SSH remote bypasses):
+To verify Git versions, token validity, credential-helper precedence, folder bindings, and active repository remote URLs (such as catching SSH remote bypasses):
 
 ```bash
 gswitch doctor
 ```
+
+`doctor` exits with a non-zero status when it finds a real issue, so it can be used in scripts and CI. Warnings alone do not fail the command.
 
 Test commit and push:
 

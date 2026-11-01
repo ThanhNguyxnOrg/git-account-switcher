@@ -28,11 +28,13 @@ gswitch check
 ```
 
 `gswitch doctor` executes 5 automated health checks:
-1. **Git Installation & Minimum Version:** Verifies Git >= 2.13.
-2. **GitHub CLI (`gh`) & Authentication:** Verifies `gh` CLI version and logged-in accounts.
-3. **Token Health & Account Verification:** Validates your OAuth tokens against GitHub's API (`gh api user`).
-4. **Folder Binding Integrity:** Checks `includeIf` rules and generated profile configs.
-5. **Active Repository Context:** If inside a Git repository, inspects remote URLs (detecting SSH bypass), local author overrides, and repository-specific credential helpers.
+1. **Git Installation & Minimum Version:** Reports the Git version and warns below 2.13.
+2. **GitHub CLI (`gh`) & Authentication:** Verifies `gh` is installed and shows its version.
+3. **Token Health & Account Verification:** Confirms each profile has a retrievable token via `gh auth token`.
+4. **Folder Binding Integrity:** Checks `includeIf` rules, generated profile configs, and credential-helper commands.
+5. **Active Repository Context:** If inside a Git repository, inspects remote URLs (detecting SSH bypass), local author overrides, credential-helper precedence, and helper-script availability.
+
+`doctor` exits non-zero when it finds a real issue. Warnings do not fail the command.
 
 ---
 
@@ -52,7 +54,7 @@ On Windows, Git Credential Manager (GCM) can aggressively cache OAuth credential
   ```
 - When using **Local Switching** (`gswitch -l <account>`), the same helper is written directly to `.git/config`.
 
-This instructs Git to request the token directly from GitHub CLI for that specific username, completely bypassing GCM token poisoning!
+This instructs Git to request the token directly from GitHub CLI for that specific username, completely bypassing GCM token poisoning. The generated helper includes an empty `helper =` reset before the bridge; without it, a global helper can win and push as the wrong account. `gswitch doctor` warns when that reset is missing.
 
 If you switch globally without folder bindings or `-l`, configure Git to ask GitHub CLI:
 
@@ -176,6 +178,48 @@ Or update a single profile:
 ```bash
 gswitch add <username> <key> "<name>" "<ID>+<username>@users.noreply.github.com"
 ```
+
+---
+
+## Installer or Update Says “No GitHub Release Found” / Attestation Failed
+
+Installers and `gswitch update` are intentionally fail-closed: they require a published `v*` GitHub Release whose assets were produced by the `Release` workflow.
+
+### The Fix
+- Check that a release exists:
+  ```bash
+  gh release view --repo ThanhNguyxnOrg/git-account-switcher
+  ```
+- Make sure `gh` is authenticated and supports attestation verification:
+  ```bash
+  gh auth status
+  gh attestation verify --help
+  ```
+- Pin a known release if you do not want the latest:
+  ```bash
+  GSWITCH_INSTALL_TAG=v1.3.0 ./install.sh
+  GSWITCH_UPDATE_TAG=v1.3.0 gswitch update
+  ```
+- Do not bypass verification by downloading files from `master`; that reintroduces the supply-chain risk this gate protects against.
+
+---
+
+## Python 3 Not Found on macOS or Linux
+
+### The Symptom
+```text
+[ERROR] Python 3 is required for this command.
+```
+
+### Why It Happens
+The POSIX implementation uses Python 3 to read and write `accounts.json` safely.
+
+### The Fix
+- **macOS:** `xcode-select --install`
+- **Debian/Ubuntu:** `sudo apt-get install python3`
+- **Fedora:** `sudo dnf install python3`
+
+Verify with `python3 --version`, then retry the command. The Windows PowerShell implementation does not require Python.
 
 ---
 
