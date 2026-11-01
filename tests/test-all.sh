@@ -81,7 +81,11 @@ if [[ "$1" == "api" ]]; then echo '{"id":1,"login":"mock-active","name":"Mock Us
 exit 0
 EOF
 chmod +x "$SANDBOX_BIN/gh"
-export PATH="$SANDBOX_BIN:$PATH"
+if command -v cygpath >/dev/null 2>&1; then
+    export PATH="$(cygpath -u "$SANDBOX_BIN"):$PATH"
+else
+    export PATH="$SANDBOX_BIN:$PATH"
+fi
 
 cleanup() {
     rm -rf "$SANDBOX_DIR"
@@ -92,7 +96,7 @@ trap cleanup EXIT
 test_empty_list() {
     local out
     out=$("$SWITCHER" list 2>&1 || true)
-    [[ "$out" == *"No accounts configured"* || "$out" == *"No account profiles"* ]]
+    [[ "$out" == *"No accounts configuration"* || "$out" == *"No accounts configured"* || "$out" == *"No account profiles"* ]]
 }
 
 test_add_first() {

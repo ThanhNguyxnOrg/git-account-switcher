@@ -363,7 +363,17 @@ try {
                 if (-not (Select-String -Path $localConfig -Pattern '^\s*helper\s*=\s*$' -Quiet)) {
                     throw "Local credential helper has no empty reset."
                 }
-                $credOut = ("protocol=https`nhost=github.com`n`n" | & git credential fill 2>&1 | Out-String)
+                $credInput = Join-Path $sandboxDir "cred-input.txt"
+                $credOutput = Join-Path $sandboxDir "cred-output.txt"
+                $credError = Join-Path $sandboxDir "cred-error.txt"
+                [System.IO.File]::WriteAllText($credInput, "protocol=https`nhost=github.com`n`n", [System.Text.Encoding]::ASCII)
+                $gitExe = (Get-Command git).Source
+                $credProc = Start-Process -FilePath $gitExe -ArgumentList @("credential", "fill") `
+                    -RedirectStandardInput $credInput -RedirectStandardOutput $credOutput `
+                    -RedirectStandardError $credError -NoNewWindow -Wait -PassThru
+                $credOut = (Get-Content -Path $credOutput -Raw -ErrorAction SilentlyContinue)
+                $credErr = (Get-Content -Path $credError -Raw -ErrorAction SilentlyContinue)
+                if ($credProc.ExitCode -ne 0) { throw "git credential fill failed: $credErr" }
                 if ($credOut -notmatch 'username=mock-work' -or $credOut -notmatch 'password=fake-token') {
                     throw "Local credential helper did not win: $credOut"
                 }
