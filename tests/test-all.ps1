@@ -13,6 +13,51 @@ $ErrorActionPreference = "Stop"
 $ScriptRoot = $PSScriptRoot
 $SwitcherPs1 = Join-Path $ScriptRoot "..\bin\git-account-switcher.ps1"
 
+# Fully isolated environment: no test may touch the real user profile or Git config.
+$suiteRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gswitch_ps_suite_" + [System.Guid]::NewGuid().ToString("N"))
+$suiteHome = Join-Path $suiteRoot "home"
+$suiteBin = Join-Path $suiteRoot "bin"
+New-Item -ItemType Directory -Path $suiteHome, $suiteBin -Force | Out-Null
+$origSwitcherHome = $env:GIT_ACCOUNT_SWITCHER_HOME
+$origSwitcherProfile = $env:GIT_ACCOUNT_SWITCHER_PROFILE
+$origGitConfigGlobal = $env:GIT_CONFIG_GLOBAL
+$origGitConfigNoSystem = $env:GIT_CONFIG_NOSYSTEM
+$origGitTerminalPrompt = $env:GIT_TERMINAL_PROMPT
+$origGhLog = $env:GH_LOG
+$origPath = $env:PATH
+$env:GIT_ACCOUNT_SWITCHER_HOME = $suiteHome
+$env:GIT_ACCOUNT_SWITCHER_PROFILE = Join-Path $suiteHome "profile.ps1"
+$env:GIT_CONFIG_GLOBAL = Join-Path $suiteRoot "gitconfig"
+$env:GIT_CONFIG_NOSYSTEM = "1"
+$env:GIT_TERMINAL_PROMPT = "0"
+$env:GH_LOG = Join-Path $suiteRoot "gh.log"
+
+$fakeGhCmd = @'
+@echo off
+echo %*>>"%GH_LOG%"
+if "%1"=="auth" if "%2"=="token" echo fake-token
+if "%1"=="auth" if "%2"=="status" echo Logged in to github.com account mock-active (keyring)
+if "%1"=="api" echo {"id":1,"login":"mock-active","name":"Mock User"}
+exit /b 0
+'@
+[System.IO.File]::WriteAllText((Join-Path $suiteBin "gh.cmd"), $fakeGhCmd, [System.Text.Encoding]::ASCII)
+
+$fakeGhSh = @'
+#!/usr/bin/env bash
+echo "$*" >> "$GH_LOG"
+if [[ "$1" == "auth" && "$2" == "token" ]]; then echo "fake-token"; exit 0; fi
+if [[ "$1" == "auth" && "$2" == "status" ]]; then echo "Logged in to github.com account mock-active (keyring)"; exit 0; fi
+if [[ "$1" == "api" && "$2" == "user" ]]; then echo "mock-active"; exit 0; fi
+if [[ "$1" == "api" ]]; then echo '{"id":1,"login":"mock-active","name":"Mock User"}'; exit 0; fi
+exit 0
+'@
+[System.IO.File]::WriteAllText((Join-Path $suiteBin "gh"), $fakeGhSh, (New-Object System.Text.UTF8Encoding($false)))
+$bashCmd = Get-Command bash -ErrorAction SilentlyContinue
+if ($bashCmd) {
+    & $bashCmd.Source -c "chmod +x '$($suiteBin.Replace('\', '/'))/gh'" 2>$null
+}
+$env:PATH = "$suiteBin;$env:PATH"
+
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " Running git-account-switcher Test Suite (PowerShell)" -ForegroundColor Cyan
@@ -65,13 +110,13 @@ Assert-Test "Help flag execution ('help')" {
 Assert-Test "Version command execution ('version' & '-v')" {
     $output1 = Invoke-Gswitch version
     $outStr1 = ($output1 | Out-String)
-    if ($outStr1 -notmatch "v1\.2\.0") {
-        throw "Expected version v1.2.0, got: $outStr1"
+    if ($outStr1 -notmatch "v1\.3\.0") {
+        throw "Expected version v1.3.0, got: $outStr1"
     }
     $output2 = Invoke-Gswitch -v
     $outStr2 = ($output2 | Out-String)
-    if ($outStr2 -notmatch "v1\.2\.0") {
-        throw "Expected version v1.2.0, got: $outStr2"
+    if ($outStr2 -notmatch "v1\.3\.0") {
+        throw "Expected version v1.3.0, got: $outStr2"
     }
 }
 
@@ -204,7 +249,7 @@ try {
         $testBoundDir = Join-Path $sandboxDir "bound_work_dir"
         $subRepo = Join-Path $testBoundDir "sub_repo"
         New-Item -ItemType Directory -Path $subRepo -Force | Out-Null
-        $isolatedCfgFile = "$HOME\.gitconfig-testisolatedkey"
+        $isolatedCfgFile = Join-Path $env:GIT_ACCOUNT_SWITCHER_HOME ".gitconfig-testisolatedkey"
         try {
             # Add an isolated account for testing folder binding
             Invoke-Gswitch add mockuser testisolatedkey "Mock Author" "mock@author.org" | Out-Null
@@ -299,10 +344,162 @@ try {
         }
     }
 
+    Assert-Test "Local switch isolates Git credentials from global helper" {
+        $oldConfig = $env:GIT_ACCOUNT_SWITCHER_CONFIG
+        $credConfig = Join-Path $sandboxDir "cred-accounts.json"
+        $env:GIT_ACCOUNT_SWITCHER_CONFIG = $credConfig
+        try {
+            $null = Invoke-Gswitch add mock-work work "Mock Work" "mock@work.test"
+            $credRepo = Join-Path $sandboxDir "credrepo"
+            New-Item -ItemType Directory -Path $credRepo -Force | Out-Null
+            Push-Location $credRepo
+            try {
+                git init -q
+                git config --global credential.https://github.com.helper '!f() { echo username=global; echo password=globalpass; }; f'
+                $null = Invoke-Gswitch -l work
+                if ($LASTEXITCODE -ne 0) { throw "gswitch -l failed with exit $LASTEXITCODE" }
+                $gitDir = git rev-parse --git-dir
+                $localConfig = Join-Path (Resolve-Path $gitDir).Path "config"
+                if (-not (Select-String -Path $localConfig -Pattern '^\s*helper\s*=\s*$' -Quiet)) {
+                    throw "Local credential helper has no empty reset."
+                }
+                $credOut = ("protocol=https`nhost=github.com`n`n" | & git credential fill 2>&1 | Out-String)
+                if ($credOut -notmatch 'username=mock-work' -or $credOut -notmatch 'password=fake-token') {
+                    throw "Local credential helper did not win: $credOut"
+                }
+                $doctorOut = (Invoke-Gswitch doctor | Out-String)
+                if ($doctorOut -match 'no empty reset') { throw "doctor reported missing reset: $doctorOut" }
+            } finally {
+                Pop-Location
+            }
+        } finally {
+            $env:GIT_ACCOUNT_SWITCHER_CONFIG = $oldConfig
+        }
+    }
+
+    Assert-Test "Local switch validates repository before touching gh" {
+        $oldConfig = $env:GIT_ACCOUNT_SWITCHER_CONFIG
+        $credConfig = Join-Path $sandboxDir "preflight-accounts.json"
+        $env:GIT_ACCOUNT_SWITCHER_CONFIG = $credConfig
+        try {
+            $null = Invoke-Gswitch add mock-work work "Mock Work" "mock@work.test"
+            if (Test-Path $env:GH_LOG) { Remove-Item -Path $env:GH_LOG -Force }
+            $notRepo = Join-Path $sandboxDir "not-a-repo"
+            New-Item -ItemType Directory -Path $notRepo -Force | Out-Null
+            Push-Location $notRepo
+            try {
+                $null = Invoke-Gswitch -l work
+                $code = $LASTEXITCODE
+            } finally {
+                Pop-Location
+            }
+            if ($code -eq 0) { throw "Expected gswitch -l to fail outside a repository." }
+            $ghLog = if (Test-Path $env:GH_LOG) { Get-Content -Path $env:GH_LOG -Raw } else { "" }
+            if ($ghLog -match 'auth switch') { throw "gh was switched before repository validation: $ghLog" }
+        } finally {
+            $env:GIT_ACCOUNT_SWITCHER_CONFIG = $oldConfig
+        }
+    }
+
+    Assert-Test "Add update preserves signingkey and custom aliases" {
+        $oldConfig = $env:GIT_ACCOUNT_SWITCHER_CONFIG
+        $signConfig = Join-Path $sandboxDir "sign-accounts.json"
+        $env:GIT_ACCOUNT_SWITCHER_CONFIG = $signConfig
+        [System.IO.File]::WriteAllText($signConfig, @'
+[
+  {"index":1,"key":"work","aliases":["1","work"],"label":"Work","username":"mock-work","name":"Mock Work","email":"mock@work.test","signingkey":"ssh-ed25519 AAAATESTKEY"}
+]
+'@, (New-Object System.Text.UTF8Encoding($false)))
+        try {
+            $null = Invoke-Gswitch alias work w
+            $null = Invoke-Gswitch add mock-work work "Mock Updated" "new@work.test"
+            $account = (Get-Content -Path $signConfig -Raw | ConvertFrom-Json)[0]
+            if ($account.signingkey -ne "ssh-ed25519 AAAATESTKEY") { throw "signingkey was lost on update." }
+            if (@($account.aliases) -notcontains "w") { throw "custom alias was lost on update." }
+        } finally {
+            $env:GIT_ACCOUNT_SWITCHER_CONFIG = $oldConfig
+        }
+    }
+
+    Assert-Test "Global switch preserves repo-local overrides; ClearLocal removes them" {
+        $oldConfig = $env:GIT_ACCOUNT_SWITCHER_CONFIG
+        $switchConfig = Join-Path $sandboxDir "switch-accounts.json"
+        $env:GIT_ACCOUNT_SWITCHER_CONFIG = $switchConfig
+        try {
+            $null = Invoke-Gswitch add mock-work work "Mock Work" "mock@work.test"
+            $localRepo = Join-Path $sandboxDir "local-override-repo"
+            New-Item -ItemType Directory -Path $localRepo -Force | Out-Null
+            Push-Location $localRepo
+            try {
+                git init -q
+                git config --local user.name "Repo Local"
+                git config --local user.email "local@repo.test"
+                $null = Invoke-Gswitch work
+                if ((git config --local user.name) -ne "Repo Local") { throw "Global switch removed the local user.name." }
+                $null = Invoke-Gswitch -ClearLocal work
+                if (git config --local user.name) { throw "ClearLocal did not remove the local user.name." }
+            } finally {
+                Pop-Location
+            }
+        } finally {
+            $env:GIT_ACCOUNT_SWITCHER_CONFIG = $oldConfig
+        }
+    }
+
+    Assert-Test "Removing an account cleans folder bindings and profile file" {
+        $oldConfig = $env:GIT_ACCOUNT_SWITCHER_CONFIG
+        $bindConfig = Join-Path $sandboxDir "bind-cleanup-accounts.json"
+        $env:GIT_ACCOUNT_SWITCHER_CONFIG = $bindConfig
+        try {
+            $null = Invoke-Gswitch add mock-work work "Mock Work" "mock@work.test"
+            $bindDir = Join-Path $sandboxDir "cleanup-bound"
+            New-Item -ItemType Directory -Path $bindDir -Force | Out-Null
+            $null = Invoke-Gswitch bind $bindDir work
+            $profileFile = Join-Path $env:GIT_ACCOUNT_SWITCHER_HOME ".gitconfig-work"
+            if (-not (Test-Path $profileFile)) { throw "bind did not create the profile file." }
+            $null = Invoke-Gswitch remove work -f
+            $bindings = git config --global --get-regexp '^includeif\.gitdir' 2>$null
+            if ($bindings -match 'gitconfig-work') { throw "folder binding was not removed." }
+            if (Test-Path $profileFile) { throw "profile file was not removed." }
+        } finally {
+            $env:GIT_ACCOUNT_SWITCHER_CONFIG = $oldConfig
+        }
+    }
+
+    Assert-Test "Completion and JSON writes are BOM-free" {
+        $oldConfig = $env:GIT_ACCOUNT_SWITCHER_CONFIG
+        $cfgDir = Join-Path $env:GIT_ACCOUNT_SWITCHER_HOME ".config\git-account-switcher"
+        New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
+        $env:GIT_ACCOUNT_SWITCHER_CONFIG = Join-Path $cfgDir "accounts.json"
+        [System.IO.File]::WriteAllText($env:GIT_ACCOUNT_SWITCHER_CONFIG, "[]", (New-Object System.Text.UTF8Encoding($false)))
+        try {
+            $null = Invoke-Gswitch completion install
+            $compFile = Join-Path $cfgDir "completion.bash"
+            $compBytes = [System.IO.File]::ReadAllBytes($compFile)
+            if ($compBytes[0] -eq 0xEF) { throw "completion.bash starts with a UTF-8 BOM." }
+            if (Test-Path $env:GIT_ACCOUNT_SWITCHER_PROFILE) {
+                $profBytes = [System.IO.File]::ReadAllBytes($env:GIT_ACCOUNT_SWITCHER_PROFILE)
+                if ($profBytes[0] -eq 0xEF) { throw "PowerShell profile starts with a UTF-8 BOM." }
+            }
+        } finally {
+            $env:GIT_ACCOUNT_SWITCHER_CONFIG = $oldConfig
+        }
+    }
+
 } finally {
     Remove-Item -Path $sandboxDir -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item env:GIT_ACCOUNT_SWITCHER_CONFIG -ErrorAction SilentlyContinue
 }
+
+# Restore the caller environment and remove the isolated suite root.
+if ($null -eq $origSwitcherHome) { Remove-Item env:GIT_ACCOUNT_SWITCHER_HOME -ErrorAction SilentlyContinue } else { $env:GIT_ACCOUNT_SWITCHER_HOME = $origSwitcherHome }
+if ($null -eq $origSwitcherProfile) { Remove-Item env:GIT_ACCOUNT_SWITCHER_PROFILE -ErrorAction SilentlyContinue } else { $env:GIT_ACCOUNT_SWITCHER_PROFILE = $origSwitcherProfile }
+if ($null -eq $origGitConfigGlobal) { Remove-Item env:GIT_CONFIG_GLOBAL -ErrorAction SilentlyContinue } else { $env:GIT_CONFIG_GLOBAL = $origGitConfigGlobal }
+if ($null -eq $origGitConfigNoSystem) { Remove-Item env:GIT_CONFIG_NOSYSTEM -ErrorAction SilentlyContinue } else { $env:GIT_CONFIG_NOSYSTEM = $origGitConfigNoSystem }
+if ($null -eq $origGitTerminalPrompt) { Remove-Item env:GIT_TERMINAL_PROMPT -ErrorAction SilentlyContinue } else { $env:GIT_TERMINAL_PROMPT = $origGitTerminalPrompt }
+if ($null -eq $origGhLog) { Remove-Item env:GH_LOG -ErrorAction SilentlyContinue } else { $env:GH_LOG = $origGhLog }
+if ($null -eq $origPath) { Remove-Item env:PATH -ErrorAction SilentlyContinue } else { $env:PATH = $origPath }
+Remove-Item -Path $suiteRoot -Recurse -Force -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
