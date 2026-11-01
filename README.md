@@ -82,7 +82,7 @@ curl -fsSL https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/lates
 Pin a release and verify its GitHub build provenance before executing it:
 
 ```bash
-TAG="v1.0.0"
+TAG="$(gh release view --repo ThanhNguyxnOrg/git-account-switcher --json tagName --jq .tagName)"
 gh release download "$TAG" --repo ThanhNguyxnOrg/git-account-switcher --pattern install.sh --dir /tmp/gswitch-install
 gh attestation verify /tmp/gswitch-install/install.sh \
   --repo ThanhNguyxnOrg/git-account-switcher \
@@ -143,7 +143,24 @@ choco install gswitch -y
 choco upgrade gswitch -y
 ```
 
+| Manager | Install | Status |
+| :--- | :--- | :--- |
+| Homebrew | `brew install ThanhNguyxnOrg/gswitch/gswitch` | Verified in CI |
+| Scoop | `scoop install gswitch` | Verified in CI |
+| Chocolatey | `choco install gswitch -y` | Initial package pending Chocolatey moderation |
+
 If installed through a package manager, use that package manager for upgrades. `gswitch update` is for direct release installs.
+
+### Release automation
+
+Pushing a `v*` tag triggers the Release workflow as **`ThanhNguyxnAgent`**:
+
+1. Builds and attests the release archives/manifests.
+2. Syncs `Formula/gswitch.rb` and `bucket/gswitch.json` into `master`.
+3. Packs, smoke-tests, and pushes the Chocolatey package with `CHOCO_API_KEY`.
+4. Triggers Homebrew/Scoop install smoke tests.
+
+Package-managed installs still upgrade through their manager (`brew upgrade`, `scoop update`, `choco upgrade`).
 
 ## 🎮 Command Cheat Sheet
 

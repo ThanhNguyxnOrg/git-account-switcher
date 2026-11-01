@@ -2,6 +2,9 @@ name: Package smoke
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
 
 permissions:
   contents: read

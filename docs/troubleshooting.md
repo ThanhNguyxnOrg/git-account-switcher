@@ -196,6 +196,8 @@ choco upgrade gswitch -y
 
 The package metadata is generated from the attested GitHub Release; there is no separate package repository.
 
+> The first Chocolatey release may remain in human moderation for a while. `choco install gswitch` becomes available after approval; track it at https://ch0.co/moderation.
+
 ---
 
 ## Installer or Update Says “No GitHub Release Found” / Attestation Failed
@@ -214,8 +216,8 @@ Installers and `gswitch update` are intentionally fail-closed: they require a pu
   ```
 - Pin a known release if you do not want the latest:
   ```bash
-  GSWITCH_INSTALL_TAG=v1.0.0 ./install.sh
-  GSWITCH_UPDATE_TAG=v1.0.0 gswitch update
+  GSWITCH_INSTALL_TAG=vX.Y.Z ./install.sh
+  GSWITCH_UPDATE_TAG=vX.Y.Z gswitch update
   ```
 - Do not bypass verification by downloading files from `master`; that reintroduces the supply-chain risk this gate protects against.
 

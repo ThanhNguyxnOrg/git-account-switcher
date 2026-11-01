@@ -26,6 +26,10 @@ git-account-switcher/
 │   └── switch-git                 # Backward-compatible Bash alias wrapper
 ├── config/
 │   └── accounts.example.json      # Generic 3-account sample configuration template
+├── Formula/
+│   └── gswitch.rb                 # Homebrew formula, updated by the Release workflow
+├── bucket/
+│   └── gswitch.json               # Scoop manifest, updated by the Release workflow
 ├── docs/
 │   ├── workflow.md                # 6-Phase Complete Workflow Guide
 │   ├── configuration.md           # Schema specification & real-world examples
@@ -35,9 +39,12 @@ git-account-switcher/
 │   └── test-all.sh                # Automated test suite for POSIX Bash
 ├── .github/workflows/
 │   ├── ci.yml                     # Windows, macOS, and Ubuntu test matrix
-│   └── release.yml                # Attested SHA-256 release on v* tags
+│   ├── release.yml                # Attested SHA-256 release, package sync, Chocolatey
+│   └── package-smoke.yml          # Homebrew/Scoop install smoke after releases
 ├── install.ps1                    # Windows 1-line & local installer
 ├── install.sh                     # macOS & Linux 1-line & local installer
+├── update.ps1                     # Windows updater (verified release)
+├── update.sh                      # macOS & Linux updater (verified release)
 ├── uninstall.ps1                  # Windows uninstaller (supports -PurgeConfig)
 ├── uninstall.sh                   # Unix uninstaller (supports --purge)
 ├── AGENT.md                       # AI Agent autonomous execution protocol
@@ -122,6 +129,8 @@ The test suites verify:
 - ✅ Global/local override behavior, including `--clear-local`
 - ✅ Folder binding lifecycle cleanup and uninstall cleanup
 - ✅ UTF-8 BOM compatibility and BOM-free generated files
+- ✅ Homebrew and Scoop install smoke tests (manual or post-release workflow)
+- ✅ Chocolatey pack/install/uninstall smoke test in the Release workflow
 
 ---
 
@@ -134,6 +143,7 @@ Releases are built by `.github/workflows/release.yml` on tags like `v1.0.0`:
 3. Push the tag. The workflow stages the binaries/config template, builds `gswitch-vX.Y.Z.tar.gz` / `.zip`, generates `gswitch.rb` (Homebrew) and `gswitch.json` (Scoop) manifests, writes `SHA256SUMS`, creates GitHub build-provenance attestations, and publishes the release as the **ThanhNguyxnAgent** GitHub App using `BOT_APP_ID` / `BOT_PRIVATE_KEY` (app token scoped to `contents: write`).
 4. `install.sh` / `install.ps1` and `gswitch update` verify `SHA256SUMS` and the attestation with `gh attestation verify` before replacing files.
 5. The Chocolatey job packs `gswitch.<version>.nupkg`, smoke-tests a local install, and pushes it to `https://push.chocolatey.org/` using the org secret `CHOCO_API_KEY`. Package metadata for Homebrew/Scoop lives in `Formula/` and `bucket/` in this repository; there is no separate package repo.
+6. When the Release workflow completes, `package-smoke.yml` installs the new version through Homebrew and Scoop on clean runners and verifies `gswitch version`.
 
 Never install or update from a mutable `master` URL; use a release tag and verify provenance.
 
