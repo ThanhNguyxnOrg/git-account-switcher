@@ -98,7 +98,9 @@ jobs:
             }
           }
           EOF
-          (cd dist && find . -maxdepth 1 -type f -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS)
+          (cd dist && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS)
+          (cd dist && sha256sum -c SHA256SUMS >/dev/null)
+          test "$(find dist -maxdepth 1 -type f ! -name SHA256SUMS | wc -l)" -eq "$(wc -l < dist/SHA256SUMS)"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be

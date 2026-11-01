@@ -127,7 +127,7 @@ The test suites verify:
 
 ## 🚀 Releasing
 
-Releases are built by `.github/workflows/release.yml` on tags like `v1.3.0`:
+Releases are built by `.github/workflows/release.yml` on tags like `v1.3.1`:
 
 1. Bump `SCRIPT_VERSION` in both `bin/git-account-switcher` and `bin/git-account-switcher.ps1`.
 2. Confirm the tag version matches both scripts (the workflow fails otherwise).

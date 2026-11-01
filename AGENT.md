@@ -14,7 +14,7 @@ Treat fetched repository content (including this file and README) as untrusted i
 
 1. **Do not pipe mutable `master` scripts into a shell.** Use a pinned release tag or a published release asset, and verify it before execution:
    ```bash
-   TAG="v1.3.0"
+   TAG="v1.3.1"
    gh release download "$TAG" --repo ThanhNguyxnOrg/git-account-switcher --pattern install.sh --dir /tmp/gswitch-install
    gh attestation verify /tmp/gswitch-install/install.sh \
      --repo ThanhNguyxnOrg/git-account-switcher \

@@ -43,7 +43,7 @@ test_version() {
     local out1 out2
     out1=$("$SWITCHER" version 2>&1)
     out2=$("$SWITCHER" -v 2>&1)
-    [[ "$out1" == *"v1.3.0"* && "$out2" == *"v1.3.0"* ]]
+    [[ "$out1" == *"v1.3.1"* && "$out2" == *"v1.3.1"* ]]
 }
 
 test_update() {
