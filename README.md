@@ -121,15 +121,18 @@ git who               # Check who is currently active
 
 ### Install via package managers
 
+Package metadata lives in this repository — no separate package repo.
+
 ```bash
-# macOS / Linux
-brew install ThanhNguyxnOrg/tap/gswitch
-brew upgrade gswitch
+# macOS / Linux (custom Homebrew tap pointing at this repo)
+brew tap ThanhNguyxnOrg/gswitch https://github.com/ThanhNguyxnOrg/git-account-switcher
+brew install ThanhNguyxnOrg/gswitch/gswitch
+brew upgrade ThanhNguyxnOrg/gswitch/gswitch
 ```
 
 ```powershell
-# Windows (Scoop)
-scoop bucket add thanhnguyxn https://github.com/ThanhNguyxnOrg/homebrew-tap
+# Windows (Scoop bucket = bucket/ in this repo)
+scoop bucket add gswitch https://github.com/ThanhNguyxnOrg/git-account-switcher
 scoop install gswitch
 scoop update gswitch
 ```
