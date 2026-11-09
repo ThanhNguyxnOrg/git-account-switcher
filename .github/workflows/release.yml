@@ -1,9 +1,7 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  create
 
 permissions:
   contents: read
@@ -12,6 +10,7 @@ permissions:
 
 jobs:
   release:
+    if: github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v')
     runs-on: ubuntu-latest
     steps:
       - name: Create ThanhNguyxnAgent token
@@ -103,10 +102,10 @@ jobs:
         with:
           subject-path: "dist/*"
 
-      - name: Publish GitHub release as ThanhNguyxnAgent
+      - name: Upload assets to central draft release
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
 
       - name: Sync package manager repositories
         env:
@@ -138,10 +137,18 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Create ThanhNguyxnAgent token for the draft release
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.BOT_APP_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          permission-contents: read
+
       - name: Pack, smoke-test, and publish
         shell: powershell
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           CHOCO_API_KEY: ${{ secrets.CHOCO_API_KEY }}
         run: |
           $ErrorActionPreference = 'Stop'
