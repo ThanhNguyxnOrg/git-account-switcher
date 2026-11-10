@@ -103,10 +103,13 @@ jobs:
         with:
           subject-path: "dist/*"
 
-      - name: Upload assets to central draft release
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+      - name: Upload release bundle for central publication
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-assets-gswitch
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Sync package manager repositories
         env:
@@ -131,9 +134,21 @@ jobs:
           update_file Formula/gswitch.rb dist/gswitch.rb "chore: gswitch v$version"
           update_file bucket/gswitch.json dist/gswitch.json "chore: gswitch v$version"
 
+  publish:
+    name: Publish verified release assets
+    needs: release
+    permissions:
+      actions: read
+      contents: read
+    uses: ThanhNguyxnOrg/.github/.github/workflows/release-publish.yml@47456eb0c467951cdaa48791d51e902b363e26be
+    with:
+      tag: ${{ github.ref_name }}
+      artifact_pattern: release-assets-gswitch
+    secrets: inherit
+
   chocolatey:
     name: Chocolatey
-    needs: release
+    needs: [release, publish]
     runs-on: windows-latest
     permissions:
       contents: read
