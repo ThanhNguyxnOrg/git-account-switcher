@@ -476,6 +476,33 @@ try {
         }
     }
 
+    Assert-Test "Install/update/uninstall preserve user Git settings" {
+        $oldGlobal = $env:GIT_CONFIG_GLOBAL
+        $env:GIT_CONFIG_GLOBAL = Join-Path $suiteRoot "install.gitconfig"
+        $github = 'credential.https://github.com.helper'
+        $gist = 'credential.https://gist.github.com.helper'
+        try {
+            git config --global --add $github 'old helper'
+            git config --global --add $github 'second helper'
+            git config --global alias.who '!git-account-switcher status'
+            & "$ScriptRoot\..\install.ps1" -SkipPathUpdate | Out-Null
+            & "$ScriptRoot\..\install.ps1" -SkipPathUpdate | Out-Null
+            $helpers = @(git config --global --get-all $gist)
+            if ($helpers.Count -ne 1 -or $helpers[0] -notlike '* auth git-credential') { throw 'Missing or duplicated Gist helper' }
+            if ((git config --global alias.switch-acc) -cne '!git-account-switcher') { throw 'Missing alias' }
+            git config --global alias.switch-acc 'log -1'
+            git config --global --add $gist 'another helper'
+            $null = Invoke-Gswitch update
+            & "$ScriptRoot\..\uninstall.ps1" | Out-Null
+            if ((@(git config --global --get-all $github) -join '|') -cne 'old helper|second helper') { throw 'Changed existing helpers' }
+            if ((@(git config --global --get-all $gist) -join '|') -cne 'another helper') { throw 'Incorrect Gist cleanup' }
+            if ((git config --global alias.who) -cne '!git-account-switcher status') { throw 'Removed user-owned alias' }
+            if ((git config --global alias.switch-acc) -cne 'log -1') { throw 'Lost edited alias' }
+        } finally {
+            $env:GIT_CONFIG_GLOBAL = $oldGlobal
+        }
+    }
+
     Assert-Test "Completion and JSON writes are BOM-free" {
         $oldConfig = $env:GIT_ACCOUNT_SWITCHER_CONFIG
         $cfgDir = Join-Path $env:GIT_ACCOUNT_SWITCHER_HOME ".config\git-account-switcher"

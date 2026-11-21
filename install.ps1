@@ -12,7 +12,8 @@
 
 [CmdletBinding()]
 param(
-    [switch]$Force
+    [switch]$Force,
+    [switch]$SkipPathUpdate
 )
 
 $ErrorActionPreference = "Stop"
@@ -121,7 +122,9 @@ $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 $pathEntries = @($userPath -split ';' | Where-Object { $_ })
 $binNorm = $binDir.TrimEnd('\', '/')
 $alreadyInPath = @($pathEntries | Where-Object { $_.TrimEnd('\', '/') -ieq $binNorm }).Count -gt 0
-if (-not $alreadyInPath) {
+if ($SkipPathUpdate) {
+    Write-Host "  [INFO] Skipping User PATH update."
+} elseif (-not $alreadyInPath) {
     Write-Host "  Adding $binDir to User PATH..." -ForegroundColor DarkCyan
     $newUserPath = if ($userPath) { "$userPath;$binDir" } else { $binDir }
     [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
@@ -160,25 +163,30 @@ if ((-not (Test-Path $destConfig)) -or $Force) {
     Write-Host "  [INFO] Existing configuration preserved at $destConfig." -ForegroundColor Green
 }
 
+function Install-GitDefault([string]$Key, [string]$Value) {
+    git config --global --includes --get-all $Key | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  [INFO] Keeping existing $Key."
+        return
+    }
+    if ($LASTEXITCODE -ne 1) { throw "Could not read Git setting: $Key" }
+    git config --file (Join-Path $configDir "installed.gitconfig") $Key $Value
+    if ($LASTEXITCODE -ne 0) { throw "Could not record Git setting: $Key" }
+    git config --global --add $Key $Value
+    if ($LASTEXITCODE -ne 0) { throw "Could not install Git setting: $Key" }
+    Write-Host "  [OK] Configured $Key." -ForegroundColor Green
+}
+
 # 4. Configure Git credential helper for GitHub CLI
 Write-Host "[4/5] Configuring Git credential helper for GitHub CLI..." -ForegroundColor Yellow
-try {
-    git config --global --unset-all credential.https://github.com.helper 2>$null
-    $ghExe = (Get-Command gh).Source
-    $ghExeSafe = $ghExe.Replace("'", "'\''")
-    git config --global --add credential.https://github.com.helper "!'$ghExeSafe' auth git-credential"
-    git config --global --add credential.https://gist.github.com.helper "!'$ghExeSafe' auth git-credential"
-    Write-Host "  [OK] Git credential helper linked to GitHub CLI ($ghExe)." -ForegroundColor Green
-} catch {
-    Write-Host "  [WARNING] Could not auto-link git credential helper: $_" -ForegroundColor Yellow
-}
+$ghExeSafe = (Get-Command gh).Source.Replace("'", "'\''")
+Install-GitDefault credential.https://github.com.helper "!'$ghExeSafe' auth git-credential"
+Install-GitDefault credential.https://gist.github.com.helper "!'$ghExeSafe' auth git-credential"
 
 # 5. Configure Git aliases
 Write-Host "[5/5] Setting up Git aliases..." -ForegroundColor Yellow
-git config --global alias.who "!git-account-switcher status"
-git config --global alias.switch-acc "!git-account-switcher"
-Write-Host "  [OK] Added git alias: git who" -ForegroundColor Green
-Write-Host "  [OK] Added git alias: git switch-acc" -ForegroundColor Green
+Install-GitDefault alias.who "!git-account-switcher status"
+Install-GitDefault alias.switch-acc "!git-account-switcher"
 
 # 6. Configure Shell auto-completion
 try {

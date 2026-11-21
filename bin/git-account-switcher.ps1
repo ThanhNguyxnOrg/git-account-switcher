@@ -1210,10 +1210,6 @@ function Update-Gswitch {
         }
     }
 
-    # Ensure aliases
-    git config --global alias.who "!git-account-switcher status"
-    git config --global alias.switch-acc "!git-account-switcher"
-
     Write-Host ""
     Write-Host "[OK] git-account-switcher updated successfully! (v$SCRIPT_VERSION)" -ForegroundColor Green
     Write-Host "     All profiles and folder bindings preserved." -ForegroundColor DarkCyan

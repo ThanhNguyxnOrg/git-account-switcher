@@ -13,7 +13,7 @@ RELEASES_REPO="ThanhNguyxnOrg/git-account-switcher"
 RELEASE_WORKFLOW="ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml"
 RELEASE_TMP=""
 cleanup() {
-    [[ -n "$RELEASE_TMP" ]] && rm -rf "$RELEASE_TMP"
+    if [[ -n "$RELEASE_TMP" ]]; then rm -rf "$RELEASE_TMP"; fi
 }
 trap cleanup EXIT
 
@@ -133,19 +133,29 @@ else
     echo "  [INFO] Existing configuration preserved at $CONFIG_DIR/accounts.json"
 fi
 
+# Record only settings we create; an existing value (even empty) belongs to the user.
+install_git_default() {
+    local key="$1" value="$2"
+    if git config --global --includes --get-all "$key" >/dev/null; then
+        echo "  [INFO] Keeping existing $key."
+        return
+    elif [[ $? != 1 ]]; then
+        return 1
+    fi
+    git config --file "$CONFIG_DIR/installed.gitconfig" "$key" "$value"
+    git config --global --add "$key" "$value"
+    echo "  [OK] Configured $key."
+}
+
 # 4. Configure Git credential helper for GitHub CLI
 echo "[4/5] Configuring Git credential helper for GitHub CLI..."
-git config --global --unset-all credential.https://github.com.helper 2>/dev/null || true
-git config --global --add credential.https://github.com.helper '!gh auth git-credential'
-git config --global --add credential.https://gist.github.com.helper '!gh auth git-credential'
-echo "  [OK] Git credential helper linked to GitHub CLI (gh)."
+install_git_default credential.https://github.com.helper '!gh auth git-credential'
+install_git_default credential.https://gist.github.com.helper '!gh auth git-credential'
 
 # 5. Configure Git aliases
 echo "[5/5] Setting up Git aliases & completions..."
-git config --global alias.who '!git-account-switcher status'
-git config --global alias.switch-acc '!git-account-switcher'
-echo "  [OK] Added git alias: git who"
-echo "  [OK] Added git alias: git switch-acc"
+install_git_default alias.who '!git-account-switcher status'
+install_git_default alias.switch-acc '!git-account-switcher'
 
 # 6. Configure Shell auto-completion
 "$BIN_DIR/git-account-switcher" completion install >/dev/null 2>&1 || true
