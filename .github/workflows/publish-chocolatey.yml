@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Create ThanhNguyxnAgent token for the published release
         id: app-token
-        uses: ThanhNguyxnOrg/.github/.github/actions/agent-token@2b5c5cad571ee93fd091e16e1734ebd819191e68
+        uses: ThanhNguyxnOrg/.github/.github/actions/agent-token@agent-v1
         with:
           profile: read
           app-id: ${{ vars.BOT_APP_ID }}
