@@ -1337,9 +1337,6 @@ update_gswitch() {
         echo -e "  \033[0;32m[OK] Attestation, checksums, and atomic replacement verified for $tag\033[0m"
     fi
 
-    git config --global alias.who "!git-account-switcher status" 2>/dev/null || true
-    git config --global alias.switch-acc "!git-account-switcher" 2>/dev/null || true
-
     echo ""
     echo -e "\033[0;32m[OK] git-account-switcher updated successfully! (v$SCRIPT_VERSION)\033[0m"
     echo -e "\033[0;36m     Your configuration ($CONFIG_FILE) and folder bindings remain safe and intact.\033[0m"

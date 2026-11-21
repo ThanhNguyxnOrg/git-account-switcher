@@ -283,6 +283,31 @@ test_bom_config() (
     [[ "$out" == *"BOM User"* ]]
 )
 
+test_installer_git_defaults() (
+    export GIT_ACCOUNT_SWITCHER_HOME="$SANDBOX_DIR/install home"
+    export GIT_CONFIG_GLOBAL="$SANDBOX_DIR/install.gitconfig"
+    local cfg="$GIT_ACCOUNT_SWITCHER_HOME/.config/git-account-switcher"
+    local github=credential.https://github.com.helper gist=credential.https://gist.github.com.helper
+    mkdir -p "$cfg"
+    echo '[]' > "$cfg/accounts.json"
+    git config --global --add "$github" ""
+    git config --global --add "$github" "custom helper"
+    git config --global alias.who '!git-account-switcher status' # Already user-owned
+
+    bash "$SCRIPT_DIR/../install.sh" >/dev/null || return 1
+    bash "$SCRIPT_DIR/../install.sh" >/dev/null || return 1
+    [[ "$(git config --global --get-all "$gist")" == '!gh auth git-credential' ]] || return 1
+    [[ "$(git config --global alias.switch-acc)" == '!git-account-switcher' ]] || return 1
+    git config --global alias.switch-acc 'log -1'
+    git config --global --add "$gist" 'another helper'
+    "$SWITCHER" update >/dev/null || return 1
+    bash "$SCRIPT_DIR/../uninstall.sh" --purge >/dev/null || return 1
+    [[ "$(git config --global --get-all "$github")" == $'\ncustom helper' &&
+       "$(git config --global --get-all "$gist")" == 'another helper' &&
+       "$(git config --global alias.who)" == '!git-account-switcher status' &&
+       "$(git config --global alias.switch-acc)" == 'log -1' ]]
+)
+
 test_uninstall_cleanup() (
     set -e
     local uh="$SANDBOX_DIR/uninstall-home"
@@ -322,6 +347,7 @@ assert_test "Global switch preserves local overrides" test_global_keeps_local
 assert_test "Remove account cleans folder bindings" test_remove_cleans_binding
 assert_test "BOM-prefixed config is readable" test_bom_config
 assert_test "Uninstall removes generated bindings/files" test_uninstall_cleanup
+assert_test "Install/update/uninstall preserve user Git settings" test_installer_git_defaults
 
 echo ""
 echo "============================================================"

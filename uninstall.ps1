@@ -31,9 +31,18 @@ foreach ($file in $filesToRemove) {
     }
 }
 
-git config --global --unset alias.who 2>$null
-git config --global --unset alias.switch-acc 2>$null
-Write-Host "[OK] Removed git aliases (git who, git switch-acc)" -ForegroundColor Green
+$installedConfig = Join-Path $configDir "installed.gitconfig"
+if (Test-Path -LiteralPath $installedConfig) {
+    foreach ($key in 'alias.who', 'alias.switch-acc', 'credential.https://github.com.helper', 'credential.https://gist.github.com.helper') {
+        $value = git config --file $installedConfig --get $key
+        if ($LASTEXITCODE -eq 1) { continue }
+        if ($LASTEXITCODE -ne 0) { throw "Could not read recorded Git setting: $key" }
+        $pattern = '^' + [regex]::Escape($value) + '$'
+        git config --global --unset $key $pattern
+        if ($LASTEXITCODE -notin 0, 5) { throw "Could not remove installed Git setting: $key" }
+    }
+    Remove-Item -LiteralPath $installedConfig -Force
+}
 
 $removedFiles = @()
 $bindingKeys = git config --global --name-only --get-regexp '^includeif\.gitdir' 2>$null
