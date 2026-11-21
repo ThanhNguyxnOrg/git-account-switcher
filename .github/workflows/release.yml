@@ -15,7 +15,7 @@ jobs:
     steps:
       - name: Create ThanhNguyxnAgent token
         id: app-token
-        uses: ThanhNguyxnOrg/.github/.github/actions/agent-token@2b5c5cad571ee93fd091e16e1734ebd819191e68
+        uses: ThanhNguyxnOrg/.github/.github/actions/agent-token@agent-v1
         with:
           profile: content
           app-id: ${{ vars.BOT_APP_ID }}
@@ -24,7 +24,7 @@ jobs:
           repositories: "git-account-switcher"
           permission-contents: write
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
@@ -99,7 +99,7 @@ jobs:
           test "$(find dist -maxdepth 1 -type f ! -name SHA256SUMS | wc -l)" -eq "$(wc -l < dist/SHA256SUMS)"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        uses: actions/attest-build-provenance@v2
         with:
           subject-path: "dist/*"
 
