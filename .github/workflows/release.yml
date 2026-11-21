@@ -24,7 +24,7 @@ jobs:
           repositories: "git-account-switcher"
           permission-contents: write
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
@@ -99,7 +99,7 @@ jobs:
           test "$(find dist -maxdepth 1 -type f ! -name SHA256SUMS | wc -l)" -eq "$(wc -l < dist/SHA256SUMS)"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*"
 
