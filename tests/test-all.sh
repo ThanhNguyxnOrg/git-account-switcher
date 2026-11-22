@@ -58,6 +58,33 @@ test_completion() {
     [[ "$out" == *"complete -F _gswitch_completions"* ]]
 }
 
+test_readme_verified_installer() (
+    snippet=$(awk '/^#### Step 1: Download, verify, and run the installer/{step=1}
+        step && /^```bash$/{code=1; next}
+        code && /^```$/{exit}
+        code{print}' "$SCRIPT_DIR/../README.md")
+    [[ -n "$snippet" ]] || return 1
+    gh() {
+        case "$1 $2" in
+            'release download')
+                [[ "$3" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+                printf '%s\n' "$3" > "$9/tag"
+                printf '%s\n' '[[ "$GSWITCH_INSTALL_TAG" == "$(cat "$(dirname "$0")/tag")" ]] && echo installer-ran' > "$9/install.sh"
+                ;;
+            'attestation verify')
+                [[ -f "$3" && "${7}" == */.github/workflows/release.yml &&
+                    "${9}" == "refs/tags/$(cat "$(dirname "$3")/tag")" &&
+                    "${10}" == --deny-self-hosted-runners && "$VERIFY_OK" == yes ]]
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    export -f gh
+    out=$(VERIFY_OK=yes bash -c "$snippet") && [[ "$out" == installer-ran ]] || return 1
+    if out=$(VERIFY_OK=no bash -c "$snippet"); then return 1; fi
+    [[ -z "$out" ]]
+)
+
 # Sandbox integration tests
 SANDBOX_DIR=$(mktemp -d 2>/dev/null || mktemp -d -t 'gswitch_test')
 SANDBOX_HOME="$SANDBOX_DIR/home"
@@ -328,6 +355,7 @@ assert_test "Help flag execution ('help')" test_help
 assert_test "Version command execution ('version' & '-v')" test_version
 assert_test "Update command execution ('update')" test_update
 assert_test "Shell completion script generator ('completion bash')" test_completion
+assert_test "README Bash installer verifies before running" test_readme_verified_installer
 assert_test "Empty config list handling" test_empty_list
 assert_test "Add profile non-interactively ('add octocat work')" test_add_first
 assert_test "Add second profile ('add student-mona school')" test_add_second

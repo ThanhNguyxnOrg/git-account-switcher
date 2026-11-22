@@ -46,7 +46,7 @@
 
 > **Requirements:** Git >= 2.13, GitHub CLI >= 2.24 (verified install/update requires `gh attestation verify`; tested with gh 2.93), and Python 3 on macOS/Linux (used to read and write `accounts.json`).
 
-> **Verified releases:** installers and `gswitch update` download a GitHub Release, verify `SHA256SUMS`, and run `gh attestation verify` (signer workflow pinned to `release.yml`) before replacing files. Pin a release with `GSWITCH_INSTALL_TAG` / `GSWITCH_UPDATE_TAG`. The one-line commands below require a published `v*` release; for development from a clone, run `./install.sh` or `./install.ps1` from the repository.
+> **Verified releases:** installers and `gswitch update` verify the release checksums and GitHub build provenance before replacing files. The commands below also verify the installer itself **before running it**. For development from a clone, run `./install.sh` or `./install.ps1` from the repository.
 
 Choose your preferred setup method:
 
@@ -63,32 +63,49 @@ Choose your preferred setup method:
 
 ---
 
-### 💻 Method 2: 1-Line Self-Installation (Manual)
+### 💻 Method 2: Verified Self-Installation (Manual)
 
-#### Step 1: Install via 1-Line Command
+#### Step 1: Download, verify, and run the installer
+
+Sign in with `gh auth login` and use a GitHub CLI version that supports `gh attestation verify --source-ref`. The examples pin `v1.0.0`; to install another version, set `tag` to a specific [published release tag](https://github.com/ThanhNguyxnOrg/git-account-switcher/releases). Both commands check the downloaded installer's attestation against the tag and this repository's `release.yml` workflow on a GitHub-hosted runner. They only run the installer if verification succeeds, and pass the same tag to it.
 
 **Windows (PowerShell):**
 ```powershell
-irm https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/latest/download/install.ps1 | iex
+& {
+    $ErrorActionPreference = 'Stop'
+    $repo = 'ThanhNguyxnOrg/git-account-switcher'
+    $tag = 'v1.0.0'
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+    $installer = Join-Path $dir 'install.ps1'
+    $previousTag = $env:GSWITCH_INSTALL_TAG
+    try {
+        gh release download $tag --repo $repo --pattern install.ps1 --dir $dir
+        if ($LASTEXITCODE -ne 0) { throw 'Installer download failed.' }
+        gh attestation verify $installer --repo $repo --signer-workflow "$repo/.github/workflows/release.yml" --source-ref "refs/tags/$tag" --deny-self-hosted-runners
+        if ($LASTEXITCODE -ne 0) { throw 'Installer verification failed.' }
+        $env:GSWITCH_INSTALL_TAG = $tag
+        & $installer
+    } finally {
+        $env:GSWITCH_INSTALL_TAG = $previousTag
+        if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force }
+    }
+}
 ```
 
 **macOS & Linux (Bash / Zsh):**
 ```bash
-curl -fsSL https://github.com/ThanhNguyxnOrg/git-account-switcher/releases/latest/download/install.sh | bash
-```
+(
+  repo='ThanhNguyxnOrg/git-account-switcher'
+  tag='v1.0.0'
+  dir="$(mktemp -d)" || exit 1
+  trap 'rm -rf "$dir"' EXIT
 
-#### Verify the Installer Manually (Recommended for High-Security Environments)
-
-Pin a release and verify its GitHub build provenance before executing it:
-
-```bash
-TAG="$(gh release view --repo ThanhNguyxnOrg/git-account-switcher --json tagName --jq .tagName)"
-gh release download "$TAG" --repo ThanhNguyxnOrg/git-account-switcher --pattern install.sh --dir /tmp/gswitch-install
-gh attestation verify /tmp/gswitch-install/install.sh \
-  --repo ThanhNguyxnOrg/git-account-switcher \
-  --signer-workflow ThanhNguyxnOrg/git-account-switcher/.github/workflows/release.yml \
-  --deny-self-hosted-runners
-bash /tmp/gswitch-install/install.sh
+  gh release download "$tag" --repo "$repo" --pattern install.sh --dir "$dir" &&
+    gh attestation verify "$dir/install.sh" --repo "$repo" \
+      --signer-workflow "$repo/.github/workflows/release.yml" \
+      --source-ref "refs/tags/$tag" --deny-self-hosted-runners &&
+    GSWITCH_INSTALL_TAG="$tag" bash "$dir/install.sh"
+)
 ```
 
 #### Step 2: Configure Your Accounts
