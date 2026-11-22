@@ -94,6 +94,38 @@ function Invoke-Gswitch {
     & powershell.exe -NoProfile -InputFormat None -ExecutionPolicy Bypass -File $SwitcherPs1 @args 2>&1
 }
 
+Assert-Test "README PowerShell installer verifies before running" {
+    $readme = Get-Content -Raw (Join-Path $ScriptRoot "../README.md")
+    $block = [regex]::Match($readme, '(?s)#### Step 1: Download, verify, and run the installer.*?```powershell\r?\n(.*?)\r?\n```')
+    if (-not $block.Success) { throw "README installer example not found" }
+    $snippet = [scriptblock]::Create($block.Groups[1].Value)
+    function gh {
+        $global:LASTEXITCODE = 1
+        if ($args[0] -eq 'release' -and $args[1] -eq 'download' -and $args[2] -match '^v\d+\.\d+\.\d+$') {
+            $dir = $args[8]
+            New-Item -ItemType Directory -Path $dir | Out-Null
+            Set-Content (Join-Path $dir 'tag') $args[2]
+            Set-Content (Join-Path $dir 'install.ps1') 'if ($env:GSWITCH_INSTALL_TAG -eq (Get-Content (Join-Path $PSScriptRoot "tag"))) { "installer-ran" }'
+            $global:LASTEXITCODE = 0
+        } elseif ($args[0] -eq 'attestation' -and $args[1] -eq 'verify' -and (Test-Path $args[2])) {
+            $tag = Get-Content (Join-Path (Split-Path $args[2]) 'tag')
+            if ($verifyOk -and $args[6] -like '*/.github/workflows/release.yml' -and $args[8] -eq "refs/tags/$tag" -and $args[9] -eq '--deny-self-hosted-runners') {
+                $global:LASTEXITCODE = 0
+            }
+        }
+    }
+    $verifyOk = $true
+    if ((& $snippet) -ne 'installer-ran') { throw "Verified installer did not run with the pinned tag" }
+    $verifyOk = $false
+    $out = @()
+    try {
+        & $snippet | ForEach-Object { $out += $_ }
+        throw "Verification failure did not stop the snippet"
+    } catch {
+        if ($_.Exception.Message -ne 'Installer verification failed.' -or $out.Count) { throw }
+    }
+}
+
 # 2. Help Command Check
 Assert-Test "Help flag execution ('help')" {
     $output = Invoke-Gswitch help
